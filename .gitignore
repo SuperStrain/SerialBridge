@@ -1,0 +1,6 @@
+bin/
+obj/
+dist/
+dist/ui_*.png
+*.user
+.vs/

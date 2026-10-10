@@ -1,0 +1,180 @@
+using System.Collections.Concurrent;
+using SerialBridge.Core.Logging;
+using SerialBridge.Core.Models;
+using SerialBridge.Core.Net;
+using SerialBridge.Core.Serial;
+using SerialBridge.Core.Tcp;
+
+namespace SerialBridge.Core.Bridge;
+
+/// <summary>一条映射的实时运行状态快照（供 UI 绑定轮询/事件刷新）。</summary>
+public sealed record MappingStatus(
+    MappingState State,
+    SerialState SerialState,
+    string? SerialMessage,
+    int ClientCount,
+    long SerialRxBytes,
+    long SerialTxBytes);
+
+/// <summary>监控条目：一条带方向与时间戳的数据记录。</summary>
+public sealed record MonitorEntry(DateTime TimeUtc, DataDirection Direction, byte[] Data);
+
+/// <summary>
+/// 映射运行时：把物理串口与 TCP 服务端组合起来，实现双向透明转发。
+/// 串口 → 网络：串口读循环回调中复制数据、更新统计、广播给客户端。
+/// 网络 → 串口：客户端接收回调中更新统计、经信号量串行化写入串口。
+/// 每条映射完全独立，任何一方的异常只影响本映射。
+/// </summary>
+public sealed class MappingRuntime : IAsyncDisposable
+{
+    private readonly SerialPortDevice _serial;
+    private readonly TcpServerService _tcp;
+
+    private long _serialRxBytes;   // 串口收到（→ 发往网络）
+    private long _serialTxBytes;   // 串口发出（← 来自网络）
+    private int _clientCount;
+
+    private volatile MappingState _state = MappingState.Stopped;
+    private string? _faultMessage;
+
+    public MappingConfig Config { get; }
+
+    public MappingState State => _state;
+    public string? FaultMessage => _faultMessage;
+    public SerialPortDevice Serial => _serial;
+    public TcpServerService Tcp => _tcp;
+    public long SerialRxBytes => Interlocked.Read(ref _serialRxBytes);
+    public long SerialTxBytes => Interlocked.Read(ref _serialTxBytes);
+    public int ClientCount => Volatile.Read(ref _clientCount);
+
+    public bool IsRunning => _state is MappingState.Running or MappingState.Starting;
+
+    /// <summary>状态变化（后台线程触发）。</summary>
+    public event Action<MappingRuntime>? StatusChanged;
+
+    /// <summary>数据监控事件（后台线程触发；payload 为只读副本）。</summary>
+    public event Action<MonitorEntry>? DataTransferred;
+
+    public MappingRuntime(MappingConfig config, IPortStreamFactory? factory = null)
+    {
+        Config = config;
+        _serial = new SerialPortDevice(factory ?? new SerialPortStreamFactory(),
+            new PortParams(config.PortName, config.BaudRate, config.DataBits,
+                config.Parity, config.StopBits, config.FlowControl));
+        _tcp = new TcpServerService(config);
+
+        _serial.DataReceived += OnSerialDataReceived;
+        _serial.StateChanged += OnSerialStateChanged;
+        _tcp.DataFromClient += OnClientData;
+        _tcp.ClientConnected += OnClientConnected;
+        _tcp.ClientClosed += OnClientClosed;
+    }
+
+    // ---------- 生命周期 ----------
+
+    /// <summary>
+    /// 启动映射：先起 TCP 监听（失败则整体失败），再启动串口会话。
+    /// 串口暂时打不开不影响映射启动（TCP 侧照常监听，串口侧重连/报错）。
+    /// </summary>
+    public async Task StartAsync()
+    {
+        if (_state is MappingState.Running or MappingState.Starting) return;
+        _state = MappingState.Starting;
+        _faultMessage = null;
+        StatusChanged?.Invoke(this);
+        try
+        {
+            _tcp.Start();
+        }
+        catch (Exception ex)
+        {
+            _state = MappingState.Faulted;
+            _faultMessage = ex.Message;
+            StatusChanged?.Invoke(this);
+            LogX.Error($"映射「{Config.Name}」启动失败：{ex.Message}", ex);
+            return;
+        }
+        _serial.Configure(
+            new PortParams(Config.PortName, Config.BaudRate, Config.DataBits,
+                Config.Parity, Config.StopBits, Config.FlowControl),
+            Config.AutoReconnect, Config.ReconnectIntervalMs);
+        _serial.Start();
+        _state = MappingState.Running;
+        StatusChanged?.Invoke(this);
+        LogX.Info($"映射「{Config.Name}」已启动：{Config.PortName} ↔ {Config.ListenIp}:{Config.ListenPort}");
+        await Task.CompletedTask;
+    }
+
+    public async Task StopAsync()
+    {
+        if (_state == MappingState.Stopped) return;
+        await _serial.StopAsync();
+        await _tcp.StopAsync();
+        _state = MappingState.Stopped;
+        _faultMessage = null;
+        Volatile.Write(ref _clientCount, 0);
+        StatusChanged?.Invoke(this);
+        LogX.Info($"映射「{Config.Name}」已停止");
+    }
+
+    // ---------- 数据路径 ----------
+
+    private void OnSerialDataReceived(byte[] data)
+    {
+        Interlocked.Add(ref _serialRxBytes, data.Length);
+        Publish(DataDirection.SerialToNet, data);
+        _tcp.Broadcast(data);
+    }
+
+    private void OnClientData(TcpClientConnection conn, byte[] data)
+    {
+        Interlocked.Add(ref _serialTxBytes, data.Length);
+        Publish(DataDirection.NetToSerial, data);
+        _ = WriteToSerialAsync(data);
+    }
+
+    /// <summary>写入串口：串行化由 SerialPortDevice 内部保证一次 Write 原子完成。</summary>
+    private async Task WriteToSerialAsync(byte[] data)
+    {
+        var ok = await _serial.SendAsync(data);
+        if (!ok && _serial.IsOpen)
+            LogX.Warn($"映射「{Config.Name}」有 {data.Length} 字节未能写入串口。");
+    }
+
+    private void OnClientConnected(TcpClientConnection conn)
+    {
+        Volatile.Write(ref _clientCount, _tcp.ClientCount);
+        StatusChanged?.Invoke(this);
+    }
+
+    private void OnClientClosed(TcpClientConnection conn, string reason)
+    {
+        Volatile.Write(ref _clientCount, _tcp.ClientCount);
+        StatusChanged?.Invoke(this);
+    }
+
+    private void OnSerialStateChanged(SerialState state, string? message) => StatusChanged?.Invoke(this);
+
+    private void Publish(DataDirection dir, byte[] data)
+    {
+        var handler = DataTransferred;
+        if (handler is null) return;
+        try { handler(new MonitorEntry(DateTime.UtcNow, dir, data)); }
+        catch (Exception ex) { LogX.Error("监控数据处理异常：" + ex.Message, ex); }
+    }
+
+    /// <summary>运行时状态快照。</summary>
+    public MappingStatus GetStatus() => new(
+        _state, _serial.State, _serial.StateMessage,
+        ClientCount, SerialRxBytes, SerialTxBytes);
+
+    /// <summary>客户端应使用的访问地址描述（不含 0.0.0.0）。</summary>
+    public string AccessAddress => NetworkInfo.DescribeAccessAddresses(Config.ListenIp, Config.ListenPort);
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+        await _serial.DisposeAsync();
+        await _tcp.DisposeAsync();
+    }
+}

@@ -1,0 +1,144 @@
+<ui:FluentWindow
+    x:Class="SerialBridge.App.Views.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="设置"
+    Width="620" Height="640"
+    MinWidth="560" MinHeight="560"
+    WindowStartupLocation="CenterOwner"
+    ResizeMode="NoResize"
+    ExtendsContentIntoTitleBar="True"
+    WindowBackdropType="Mica"
+    Background="{DynamicResource ApplicationBackgroundBrush}">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="设置" Padding="8,0" />
+
+        <ScrollViewer Grid.Row="1" Margin="28,10,28,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <TextBlock Text="外观" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,8"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Border Style="{StaticResource SettingsRowStyle}">
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="主题" FontSize="13.5"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="深色 / 浅色 / 跟随系统" FontSize="11.5"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <ComboBox HorizontalAlignment="Right" Width="140" MinWidth="120"
+                                  SelectedIndex="{Binding ThemeIndex}">
+                            <ComboBoxItem Content="浅色" />
+                            <ComboBoxItem Content="深色" />
+                            <ComboBoxItem Content="跟随系统" />
+                        </ComboBox>
+                    </Grid>
+                </Border>
+
+                <TextBlock Text="启动与运行" FontSize="14" FontWeight="SemiBold" Margin="0,16,0,8"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Border Style="{StaticResource SettingsRowStyle}">
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="开机自动启动" FontSize="13.5"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="当前用户登录后自动运行（最小化到托盘）" FontSize="11.5"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <CheckBox HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding LaunchOnStartup}" />
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource SettingsRowStyle}">
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="启动时自动恢复映射" FontSize="13.5"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="启动后自动开启勾选了“自动运行”的映射" FontSize="11.5"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <CheckBox HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding RestoreMappingsOnStartup}" />
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource SettingsRowStyle}">
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="最小化到系统托盘" FontSize="13.5"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="最小化窗口后转入托盘后台运行，映射保持工作" FontSize="11.5"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <CheckBox HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding MinimizeToTray}" />
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource SettingsRowStyle}">
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="点击关闭按钮时隐藏到托盘" FontSize="13.5"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="关闭窗口不退出程序（从托盘菜单退出）" FontSize="11.5"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <CheckBox HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding CloseToTray}" />
+                    </Grid>
+                </Border>
+
+                <TextBlock Text="日志" FontSize="14" FontWeight="SemiBold" Margin="0,16,0,8"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Border Style="{StaticResource SettingsRowStyle}">
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="运行日志目录" FontSize="13.5"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="{Binding LogDirText}" FontSize="11.5" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <ui:Button HorizontalAlignment="Right" Content="打开目录" Click="OnOpenLogDir" />
+                    </Grid>
+                </Border>
+
+                <TextBlock Text="关于" FontSize="14" FontWeight="SemiBold" Margin="0,16,0,8"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Border Style="{StaticResource SettingsRowStyle}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="34" Height="34" CornerRadius="8" Background="#2563EB">
+                                <ui:SymbolIcon Symbol="ArrowSwap24" FontSize="18" Foreground="White" />
+                            </Border>
+                            <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                                <TextBlock FontSize="15" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                                    <Run Text="SerialBridge" /><Run Text="  v1.0.0" />
+                                </TextBlock>
+                                <TextBlock FontSize="11.5"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Text="Windows 串口 ↔ TCP/IP 双向透明转发工具" />
+                            </StackPanel>
+                        </StackPanel>
+                        <TextBlock FontSize="11.5" Margin="0,10,0,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="数据目录：%AppData%\SerialBridge（配置与日志）。原始 TCP 透传不包含加密或客户端身份认证，请在可信局域网内使用，并可通过监听地址与防火墙规则控制访问范围。" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Padding="28,14"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <ui:Button Content="关闭" MinWidth="96" IsCancel="True" Appearance="Secondary" Click="OnClose" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

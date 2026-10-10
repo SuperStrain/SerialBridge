@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{F9013D36-418D-4E22-BBEF-3015099617EA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SerialBridge.Core", "src\SerialBridge.Core\SerialBridge.Core.csproj", "{FA72331B-B62C-4C17-A259-B3AB4FD2690E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SerialBridge.App", "src\SerialBridge.App\SerialBridge.App.csproj", "{63409594-9176-43DB-A74D-F91F495637B4}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C509B000-E16F-4450-AFF1-A7F0A8613653}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SerialBridge.Core.Tests", "tests\SerialBridge.Core.Tests\SerialBridge.Core.Tests.csproj", "{400EBCCE-D6AA-4F03-96E8-1063B078B012}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FA72331B-B62C-4C17-A259-B3AB4FD2690E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FA72331B-B62C-4C17-A259-B3AB4FD2690E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FA72331B-B62C-4C17-A259-B3AB4FD2690E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FA72331B-B62C-4C17-A259-B3AB4FD2690E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{63409594-9176-43DB-A74D-F91F495637B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{63409594-9176-43DB-A74D-F91F495637B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{63409594-9176-43DB-A74D-F91F495637B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{63409594-9176-43DB-A74D-F91F495637B4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{400EBCCE-D6AA-4F03-96E8-1063B078B012}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{400EBCCE-D6AA-4F03-96E8-1063B078B012}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{400EBCCE-D6AA-4F03-96E8-1063B078B012}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{400EBCCE-D6AA-4F03-96E8-1063B078B012}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FA72331B-B62C-4C17-A259-B3AB4FD2690E} = {F9013D36-418D-4E22-BBEF-3015099617EA}
+		{63409594-9176-43DB-A74D-F91F495637B4} = {F9013D36-418D-4E22-BBEF-3015099617EA}
+		{400EBCCE-D6AA-4F03-96E8-1063B078B012} = {C509B000-E16F-4450-AFF1-A7F0A8613653}
+	EndGlobalSection
+EndGlobal
