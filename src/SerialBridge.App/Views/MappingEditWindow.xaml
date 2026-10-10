@@ -8,6 +8,7 @@
     MinWidth="560" MinHeight="660"
     WindowStartupLocation="CenterOwner"
     ResizeMode="NoResize"
+    Icon="pack://application:,,,/Assets/app.ico"
     ExtendsContentIntoTitleBar="True"
     WindowBackdropType="Mica"
     Background="{DynamicResource ApplicationBackgroundBrush}">
@@ -123,17 +124,20 @@
                                  Content="多客户端模式（广播）" />
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" Margin="0,10,0,0"
-                            IsEnabled="{Binding ClientModeIsSingle, Converter={StaticResource InverseBool}}">
-                    <TextBlock Text="最大客户端数量" VerticalAlignment="Center" FontSize="13"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                    <ui:NumberBox Value="{Binding MaxClients, UpdateSourceTrigger=PropertyChanged}"
-                                  Minimum="2" Maximum="64" SpinButtonPlacementMode="Inline"
-                                  Width="130" Margin="12,0,0,0" ClearButtonEnabled="False" />
+                <!-- 仅多客户端模式显示；单客户端模式下该参数无意义，隐藏以免误导 -->
+                <StackPanel Margin="0,10,0,0"
+                            Visibility="{Binding ClientModeIsSingle, Converter={StaticResource InverseBoolToVisibility}}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="最大客户端数量" VerticalAlignment="Center" FontSize="13"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <ui:NumberBox Value="{Binding MaxClients, UpdateSourceTrigger=PropertyChanged}"
+                                      Minimum="2" Maximum="64" SpinButtonPlacementMode="Inline"
+                                      Width="130" Margin="12,0,0,0" ClearButtonEnabled="False" />
+                    </StackPanel>
+                    <TextBlock FontSize="11.5" Margin="0,6,0,0" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                               Text="多客户端模式下，串口数据广播给所有客户端；多个客户端的数据按先后顺序写入串口，但不保证不同客户端之间的请求响应配对。" />
                 </StackPanel>
-                <TextBlock FontSize="11.5" Margin="0,6,0,0" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                           Text="多客户端模式下，串口数据广播给所有客户端；多个客户端的数据按先后顺序写入串口，但不保证不同客户端之间的请求响应配对。" />
 
                 <Separator Margin="0,18,0,4" Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
                 <TextBlock Text="运行选项" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,10"

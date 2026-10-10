@@ -24,6 +24,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Resource Include="Assets/app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\SerialBridge.Core\SerialBridge.Core.csproj" />
   </ItemGroup>
 

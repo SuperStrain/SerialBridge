@@ -10,6 +10,7 @@
     Width="1180" Height="820"
     MinWidth="960" MinHeight="640"
     WindowStartupLocation="CenterScreen"
+    Icon="pack://application:,,,/Assets/app.ico"
     ExtendsContentIntoTitleBar="True"
     WindowBackdropType="Mica"
     Background="{DynamicResource ApplicationBackgroundBrush}">
