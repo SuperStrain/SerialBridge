@@ -38,10 +38,10 @@ public partial class MappingEditViewModel : ObservableObject
     [ObservableProperty] private Handshake _flowControl = Handshake.None;
     [ObservableProperty] private string _listenIp = "0.0.0.0";
     [ObservableProperty] private string _listenPortText = "9001";
-    [ObservableProperty] private bool _isSingleClient = true;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ClientModeIsSingle))]
-    private int _maxClients = 8;
+    private bool _isSingleClient = true;
+    [ObservableProperty] private int _maxClients = 8;
     [ObservableProperty] private bool _autoReconnect = true;
     [ObservableProperty] private string _reconnectSecondsText = "3";
     [ObservableProperty] private bool _autoStart;
