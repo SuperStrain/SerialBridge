@@ -8,7 +8,7 @@
 #define AppExeName "SerialBridge.exe"
 
 [Setup]
-AppId={{7A5C2E41-3B8D-4F6A-9C1E-SERIALBRIDGE1}
+AppId={{7A5C2E41-3B8D-4F6A-9C1E-8E3D2A1B4C5D}
 AppName={#AppName} 串口网络桥接工具
 AppVersion={#AppVersion}
 AppVerName={#AppName} v{#AppVersion}
@@ -60,7 +60,14 @@ FinishedLabel=安装完成。%n%n[userename] 已安装到 [name]。您的映射�
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: string;
+  ResultCode: Integer;
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // 先关闭运行中的程序：文件被占用会导致卸载不完整（残留文件与快捷方式）
+    Exec('taskkill', '/IM SerialBridge.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(800);
+  end;
   if CurUninstallStep = usPostUninstall then
   begin
     DataDir := ExpandConstant('{userappdata}') + '\SerialBridge';
