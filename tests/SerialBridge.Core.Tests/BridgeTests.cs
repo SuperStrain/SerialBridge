@@ -207,7 +207,12 @@ public sealed class BridgeTests : IAsyncLifetime
             }));
         }
         await Task.WhenAll(tasks);
-        await WaitUntil(() => rt.SerialTxBytes >= 700, TimeSpan.FromSeconds(10));
+        await WaitUntil(() =>
+        {
+            lock (device.DataWrittenByBridge)
+                return device.DataWrittenByBridge.Sum(b => b.Length) >= 700;
+        }, TimeSpan.FromSeconds(10));
+        await Task.Delay(300); // 等写队列完全排空
 
         var all = device.DataWrittenByBridge.ToArray();
         // TCP 字节流允许小消息合并到达；验证每个写入串口的块都是完整消息的组合，无字节交叉
@@ -330,6 +335,41 @@ public sealed class BridgeTests : IAsyncLifetime
         rebinder.Start();
         rebinder.Stop();
         await Assert.ThrowsAnyAsync<SocketException>(() => ConnectAsync(_port));
+    }
+
+
+    [Fact]
+    public async Task SingleClient_KeepsByteOrderOnBurstWrites()
+    {
+        // 模拟交互式终端场景（如 Tab 补全）：小数据块高频到达，
+        // 设备端收到的字节顺序必须与客户端发送顺序完全一致
+        await using var rt = CreateRuntime();
+        await rt.StartAsync();
+        await WaitSerialOpen(rt);
+        var device = _factory.OpenedStreams.Single();
+
+        using var client = await ConnectAsync(_port);
+        await WaitUntil(() => rt.ClientCount == 1);
+
+        var stream = client.GetStream();
+        var sent = new List<byte>();
+        for (var round = 0; round < 50; round++)
+        {
+            // 模拟 "ifc	"：一批 4 字节后紧跟下一批，块间不等待
+            var batch = new byte[] { (byte)'i', (byte)'f', (byte)'c', 0x09, (byte)round };
+            await stream.WriteAsync(batch);
+            sent.AddRange(batch);
+        }
+        await WaitUntil(() =>
+        {
+            lock (device.DataWrittenByBridge)
+                return device.DataWrittenByBridge.Sum(b => b.Length) >= sent.Count;
+        }, TimeSpan.FromSeconds(10));
+        await Task.Delay(300); // 等写队列完全排空
+
+        var all = device.DataWrittenByBridge.ToArray();
+        var combined = all.SelectMany(b => b).ToArray();
+        Assert.Equal(sent, combined);
     }
 
     // ---------- 辅助 ----------

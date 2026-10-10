@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using SerialBridge.Core.Logging;
 using SerialBridge.Core.Models;
 using SerialBridge.Core.Net;
@@ -99,6 +100,8 @@ public sealed class MappingRuntime : IAsyncDisposable
                 Config.Parity, Config.StopBits, Config.FlowControl),
             Config.AutoReconnect, Config.ReconnectIntervalMs);
         _serial.Start();
+        _writerCts = new CancellationTokenSource();
+        _serialWriterTask = Task.Run(() => SerialWriterLoopAsync(_writerCts.Token));
         _state = MappingState.Running;
         StatusChanged?.Invoke(this);
         LogX.Info($"映射「{Config.Name}」已启动：{Config.PortName} ↔ {Config.ListenIp}:{Config.ListenPort}");
@@ -108,6 +111,12 @@ public sealed class MappingRuntime : IAsyncDisposable
     public async Task StopAsync()
     {
         if (_state == MappingState.Stopped) return;
+        _writerCts?.Cancel();
+        if (_serialWriterTask is not null)
+        {
+            try { await _serialWriterTask.WaitAsync(TimeSpan.FromSeconds(3)); } catch { }
+            _serialWriterTask = null;
+        }
         await _serial.StopAsync();
         await _tcp.StopAsync();
         _state = MappingState.Stopped;
@@ -118,6 +127,18 @@ public sealed class MappingRuntime : IAsyncDisposable
     }
 
     // ---------- 数据路径 ----------
+
+    // 网络 → 串口写队列：所有客户端的数据按 TCP 到达顺序经单一写任务落串口，
+    // 消除并发 Write 的乱序风险（需求：保证各方向的数据顺序）。
+    private readonly Channel<byte[]> _serialWriteQueue = Channel.CreateBounded<byte[]>(
+        new BoundedChannelOptions(2048)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+    private CancellationTokenSource? _writerCts;
+    private Task? _serialWriterTask;
 
     private void OnSerialDataReceived(byte[] data)
     {
@@ -130,15 +151,30 @@ public sealed class MappingRuntime : IAsyncDisposable
     {
         Interlocked.Add(ref _serialTxBytes, data.Length);
         Publish(DataDirection.NetToSerial, data);
-        _ = WriteToSerialAsync(data);
+        if (!_serialWriteQueue.Writer.TryWrite(data))
+        {
+            // 队列满：写串口长期阻塞（如流控卡死）时保护内存，丢弃并记录
+            LogX.Warn($"映射「{Config.Name}」串口写队列积压超限，丢弃 {data.Length} 字节。");
+        }
     }
 
-    /// <summary>写入串口：串行化由 SerialPortDevice 内部保证一次 Write 原子完成。</summary>
-    private async Task WriteToSerialAsync(byte[] data)
+    /// <summary>串口写任务：按到达顺序逐块写入（SendAsync 内部保证单次 Write 原子）。</summary>
+    private async Task SerialWriterLoopAsync(CancellationToken ct)
     {
-        var ok = await _serial.SendAsync(data);
-        if (!ok && _serial.IsOpen)
-            LogX.Warn($"映射「{Config.Name}」有 {data.Length} 字节未能写入串口。");
+        try
+        {
+            await foreach (var data in _serialWriteQueue.Reader.ReadAllAsync(ct))
+            {
+                var ok = await _serial.SendAsync(data, ct);
+                if (!ok && _serial.IsOpen)
+                    LogX.Warn($"映射「{Config.Name}」有 {data.Length} 字节未能写入串口。");
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            LogX.Error($"映射「{Config.Name}」串口写任务异常终止：{ex.Message}", ex);
+        }
     }
 
     private void OnClientConnected(TcpClientConnection conn)

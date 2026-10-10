@@ -19,6 +19,7 @@
         <!-- 系统托盘图标 -->
         <tb:TaskbarIcon
             x:Key="TrayIcon"
+            IconSource="pack://application:,,,/Assets/app.ico"
             ToolTipText="SerialBridge"
             TrayLeftMouseUp="OnTrayIconClick"
             Visibility="Visible">
