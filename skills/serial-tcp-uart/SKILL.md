@@ -88,10 +88,13 @@ python3 serial_session.py --host 192.168.1.100 --port 9001 raw --hex "4154 0d" -
 需要人盯着看时，把以下命令告诉用户（不要自己起交互终端）：
 
 ```bash
-# 注意：不要用 screen //telnet —— 其 telnet 协议栈与哑透传对端不匹配，实测 Tab 失灵
 socat PTY,link=/tmp/ttydev,waitslave TCP:192.168.1.100:9001 &   # PTY 方式
 picocom /tmp/ttydev                             # 与真实串口体验一致
 ```
+
+并提醒用户**不要用交互式终端工具直连 TCP**：`screen //telnet`（实测 Tab 失灵——
+其 telnet 协议栈与哑透传对端不匹配）、`nc`（行缓冲，Tab/Ctrl+C 攒到回车才发送）、
+`telnet`（IAC 字节破坏二进制数据）。这些都已在真实设备上验证过。
 
 ## 故障排查
 
@@ -101,6 +104,7 @@ picocom /tmp/ttydev                             # 与真实串口体验一致
 | connect 抛"无法连接" | 映射未启动、主机 IP 错误、端口错误或防火墙拦截；用 `nc -zv <ip> <port>` 验证端口可达性 |
 | exec_command 超时（退出码 4） | 提示符样式不匹配（用 `--prompt` 指定）；命令本身卡住（先发 Ctrl+C）；或输出量巨大（加大 timeout） |
 | 收到的响应不完整 | 提示符等待提前命中（输出里含提示符样式文本），改用更精确的提示符正则 |
+| 用户报告按键失灵（Tab/Ctrl/Ctrl+C 无响应） | 先用脚本排除链路问题：`send_raw(b"\t")` 后 `read_available(1.5)`，若设备回发响应则链路正常，问题出在用户所用的终端工具（nc 行缓冲、screen //telnet 协议不匹配），建议改用 socat PTY + picocom；若设备无响应，再查映射状态与设备本身 |
 | Windows 侧看不到流量 | 确认 SerialBridge 主界面该映射为"运行中"且串口已连接 |
 
 ## 部署到 Linux 主机
