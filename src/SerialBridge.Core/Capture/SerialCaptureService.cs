@@ -141,6 +141,7 @@ public sealed class SerialCaptureService : IDisposable
                     // 单块写入失败：丢弃该块并降级重试，绝不终止写线程
                     CloseWriter();
                     SetState(CaptureState.Faulted, $"写入失败：{ex.Message}（每 30 秒自动重试）");
+                    LogX.Error($"串口日志写入异常堆栈：{ex}", ex);
                 }
                 if (State == CaptureState.Faulted)
                 {
@@ -201,7 +202,8 @@ public sealed class SerialCaptureService : IDisposable
 
     /// <summary>
     /// 文本模式写入：按行注入时间戳前缀（[yyyy-MM-dd HH:mm:ss.fff] ），
-    /// 正文内容保持原样（UTF-8 原始字节 / GBK 转码），跨块续行不重复加前缀。
+    /// 正文内容保持原样（UTF-8 原始字节 / GBK 转码）。CR 与 LF 均视为行界，
+    /// 行界符原样写并置行首标志，确保下一行（无论来自哪个块）都带前缀。
     /// </summary>
     private async Task WriteTextWithTimestampsAsync(CaptureEntry e, CancellationToken ct)
     {
@@ -209,18 +211,28 @@ public sealed class SerialCaptureService : IDisposable
         var start = 0;
         for (var i = 0; i < e.Data.Length; i++)
         {
-            if (e.Data[i] == (byte)'\n')
+            if (e.Data[i] is (byte)'\n' or (byte)'\r')
             {
-                await WriteSegmentAsync(stream, e.Data, start, i + 1, ct);
+                if (i > start)
+                    await WriteSegmentAsync(stream, e.Data, start, i - start, ct);
+                await stream.WriteAsync(new byte[] { e.Data[i] }, ct);
+                _currentFileSize += 1;
+                _lineStart = true;   // 行界 → 下一内容字符处于新行行首
                 start = i + 1;
             }
         }
         if (start < e.Data.Length)
+        {
             await WriteSegmentAsync(stream, e.Data, start, e.Data.Length - start, ct);
+            _lineStart = false;
+        }
     }
 
+    /// <summary>写入一行内容段（不含行界符）：行首注入时间戳，正文按编码处理。</summary>
     private async Task WriteSegmentAsync(Stream stream, byte[] data, int offset, int length, CancellationToken ct)
     {
+        if (length <= 0) return;
+
         if (_lineStart)
         {
             var prefix = Encoding.UTF8.GetBytes($"[{_opt.Clock():yyyy-MM-dd HH:mm:ss.fff}] ");
@@ -230,8 +242,6 @@ public sealed class SerialCaptureService : IDisposable
         }
 
         var slice = data[offset..(offset + length)];
-        var endsWithLf = length > 0 && slice[^1] == (byte)'\n';
-
         if (_opt.TextEncoding == DataLogTextEncoding.Utf8)
         {
             await stream.WriteAsync(slice, ct);
@@ -239,15 +249,11 @@ public sealed class SerialCaptureService : IDisposable
         }
         else
         {
-            // GBK 设备：解码后转 UTF-8 写出（行尾以转码后的字节判定）
             var text = Encoding.GetEncoding("GBK").GetString(slice);
             var utf8 = Encoding.UTF8.GetBytes(text);
             await stream.WriteAsync(utf8, ct);
             _currentFileSize += utf8.Length;
-            endsWithLf = utf8.Length > 0 && utf8[^1] == (byte)'\n';
         }
-
-        _lineStart = endsWithLf;
     }
 
     /// <summary>确保当前写入文件就绪：按天切换、超限分卷、打开失败重试。</summary>
@@ -335,9 +341,11 @@ public sealed class SerialCaptureService : IDisposable
         try
         {
             if (_opt.RetentionDays <= 0) return;
+            var prefix = SanitizeName(_opt.MappingName) + "_";
             var cutoff = _opt.Clock().AddDays(-_opt.RetentionDays);
-            foreach (var f in Directory.EnumerateFiles(_opt.Directory, "*.log"))
+            foreach (var f in Directory.EnumerateFiles(_opt.Directory, prefix + "*.log"))
             {
+                // 仅删除本映射创建的日志（文件名前缀匹配），不触碰用户目录内的其他文件
                 if (File.GetLastWriteTime(f) < cutoff)
                 {
                     File.Delete(f);

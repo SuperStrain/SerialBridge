@@ -35,6 +35,42 @@ public sealed class SerialCaptureTests : IDisposable
         Clock = clock ?? (() => new DateTime(2026, 10, 11, 12, 0, 0)),
     };
 
+
+    [Fact]
+    public async Task TextUtf8_HighFrequencyMultiSegment_AllDataPersisted()
+    {
+        // 复现：高频小块 + 多行混合（模拟海思板输出模式），写线程不得崩溃、数据不中断
+        var rnd = new Random(42);
+        await RunCaptureAsync(Options(), svc =>
+        {
+            for (var i = 0; i < 300; i++)
+            {
+                var len = rnd.Next(1, 200);
+                var buf = new byte[len];
+                for (var j = 0; j < len; j++)
+                    buf[j] = (byte)(rnd.Next(4) == 0 ? (rnd.Next(2) == 0 ? '\n' : '\r') : ('a' + rnd.Next(26)));
+                svc.Enqueue(DataDirection.SerialToNet, buf);
+            }
+        }, TimeSpan.FromMilliseconds(1200));
+
+        var file = WaitForFile(_dir);
+        var content = File.ReadAllText(file);
+
+        // 每一行（按 \n 分隔）都应带时间戳前缀
+        var lines = content.Split('\n');
+        Assert.True(lines.Length > 50, $"行数 {lines.Length} 应大于 50");
+        foreach (var line in lines)
+        {
+            // 跳过行首行界符（上一行数据末尾的 CR 会附着在按 LF 分割的下一行开头）与空行
+            var body = line.TrimStart('\r', '\n');
+            if (body.Length == 0) continue;
+            Assert.True(body.StartsWith('['),
+                $"行缺少时间戳前缀: {System.Text.Json.JsonSerializer.Serialize(line[..Math.Min(40, line.Length)])}");
+        }
+
+        Assert.DoesNotContain("\uFFFD", content);
+    }
+
     private static string WaitForFile(string dir, int timeoutMs = 5000)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
