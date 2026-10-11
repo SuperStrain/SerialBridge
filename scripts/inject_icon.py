@@ -6,6 +6,13 @@ import ctypes
 import struct
 import sys
 
+# CI runner（如 GitHub windows-latest）控制台常为 cp1252，中文输出会抛 UnicodeEncodeError
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 BeginUpdateResource = kernel32.BeginUpdateResourceW
@@ -29,7 +36,7 @@ def main(exe_path: str, ico_path: str) -> int:
     data = open(ico_path, "rb").read()
     reserved, ico_type, count = struct.unpack_from("<HHH", data, 0)
     if ico_type != 1 or count == 0:
-        print(f"错误：{ico_path} 不是有效的 ICO 文件")
+        print(f"Error: {ico_path} is not a valid ICO file")
         return 1
 
     # 解析目录条目并收集 RT_ICON 帧数据
@@ -45,30 +52,30 @@ def main(exe_path: str, ico_path: str) -> int:
 
     h = BeginUpdateResource(exe_path, False)
     if not h:
-        print(f"错误：BeginUpdateResource 失败（WinError {ctypes.get_last_error()}）")
+        print(f"Error: BeginUpdateResource failed (WinError {ctypes.get_last_error()})")
         return 1
 
     ok = True
     for rid, (w, hgt, bpp, frame) in enumerate(frames, start=1):
         buf = (ctypes.c_char * len(frame)).from_buffer_copy(frame)
         if not UpdateResource(h, ctypes.c_void_p(RT_ICON), ctypes.c_void_p(rid), 0, buf, len(frame)):
-            print(f"错误：写入 RT_ICON #{rid} 失败（WinError {ctypes.get_last_error()}）")
+            print(f"Error: writing RT_ICON #{rid} failed (WinError {ctypes.get_last_error()})")
             ok = False
             break
     if ok:
         gbuf = (ctypes.c_char * len(group)).from_buffer_copy(group)
         if not UpdateResource(h, ctypes.c_void_p(RT_GROUP_ICON), ctypes.c_void_p(1), 0, gbuf, len(group)):
-            print(f"错误：写入 RT_GROUP_ICON 失败（WinError {ctypes.get_last_error()}）")
+            print(f"Error: writing RT_GROUP_ICON failed (WinError {ctypes.get_last_error()})")
             ok = False
 
     if ok and not EndUpdateResource(h, False):
-        print(f"错误：EndUpdateResource 失败（WinError {ctypes.get_last_error()}）")
+        print(f"Error: EndUpdateResource failed (WinError {ctypes.get_last_error()})")
         return 1
     if not ok:
         EndUpdateResource(h, True)  # 丢弃修改
         return 1
 
-    print(f"已将 {len(frames)} 帧图标写入 {exe_path}")
+    print(f"Injected {len(frames)} icon frames into {exe_path}")
     return 0
 
 
