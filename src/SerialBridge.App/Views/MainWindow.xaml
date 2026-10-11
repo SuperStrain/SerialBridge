@@ -210,8 +210,33 @@
             </StackPanel>
         </Grid>
 
+        <!-- 升级横幅（新版本可用时显示） -->
+        <Grid Grid.Row="2" Margin="32,12,32,0"
+              Visibility="{Binding UpdateBannerVisible, Converter={StaticResource BoolToVisibility}}">
+            <Border Background="#142563EB" BorderBrush="#552563EB" BorderThickness="1"
+                    CornerRadius="8" Padding="14,10">
+                <Grid>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="ArrowSyncCircle24" FontSize="17" Foreground="#2563EB" />
+                        <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" FontSize="13"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                            <Run Text="{Binding UpdateBannerTitle, Mode=OneWay}" />
+                            <Run Text="{Binding UpdateBannerMessage, Mode=OneWay}"
+                                 Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </TextBlock>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <ui:Button Content="立即升级" Appearance="Primary"
+                                   Margin="0,0,8,0" Command="{Binding UpdateNowCommand}" />
+                        <ui:Button Content="跳过此版本" Command="{Binding SkipVersionCommand}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
         <!-- 统计卡片 -->
-        <UniformGrid Grid.Row="2" Columns="4" Margin="32,12,32,4">
+        <UniformGrid Grid.Row="2" Columns="4" Margin="32,12,32,4"
+                     Visibility="{Binding UpdateBannerVisible, Converter={StaticResource InverseBoolToVisibility}}">
             <Border Style="{StaticResource StatCardStyle}">
                 <StackPanel Orientation="Horizontal">
                     <Border Width="38" Height="38" CornerRadius="8" Background="#142563EB">

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using SerialBridge.App.Services;
 using SerialBridge.Core.Logging;
 using SerialBridge.Core.Models;
@@ -20,6 +21,8 @@ public partial class SettingsWindow : FluentWindow
     {
         InitializeComponent();
         Owner = owner;
+        _viewModel.UpdateService = new SerialBridge.App.Services.UpdateService(new SerialBridge.App.Services.AppUpdateEnvironment());
+        _viewModel.AutoCheckUpdates = AppServices.Settings.General.AutoCheckUpdates;
         DataContext = _viewModel;
     }
 
@@ -70,6 +73,30 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _restoreMappingsOnStartup;
     public string LogDirText => LogService.LogDir;
     public string AppVersion => AppServices.AppVersion;
+
+    public Services.UpdateService? UpdateService { get; set; }
+
+    [ObservableProperty] private bool _autoCheckUpdates = true;
+    [ObservableProperty] private string _updateStatusText = "";
+
+    partial void OnAutoCheckUpdatesChanged(bool value)
+    {
+        _general.AutoCheckUpdates = value;
+        AppServices.SaveSettingsSafe();
+    }
+
+    [RelayCommand]
+    private async Task CheckUpdatesAsync()
+    {
+        if (UpdateService is null) return;
+        UpdateStatusText = "检查中…";
+        var info = await UpdateService.CheckForUpdateAsync();
+        if (info is null)
+            UpdateStatusText = "已是最新版本";
+        else
+            UpdateStatusText = $"新版本 v{info.Version} 可用" +
+                (info.IsPortableAssetOnly ? "（请从 GitHub 下载）" : "（可在主界面横幅升级）");
+    }
 
     partial void OnThemeIndexChanged(int value)
     {

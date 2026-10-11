@@ -29,6 +29,11 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _localIpSummary = "";
     [ObservableProperty] private bool _hasMappings;
     [ObservableProperty] private bool _firewallWarningVisible;
+    [ObservableProperty] private bool _updateBannerVisible;
+    [ObservableProperty] private string _updateBannerTitle = "";
+    [ObservableProperty] private string _updateBannerMessage = "";
+
+    public UpdateViewModel? Update { get; private set; }
     [ObservableProperty] private string _refreshedAtText = "";
     [ObservableProperty] private string _dataDirText = Core.Logging.LogService.AppDataDir;
     [ObservableProperty] private string _appVersion = Services.AppServices.AppVersion;
@@ -39,6 +44,7 @@ public partial class MainViewModel : ObservableObject
     {
         RequestEdit += OnRequestEdit;
         AppServices.Manager.MappingsChanged += RebuildMappings;
+        InitializeUpdate();
 
         // 每秒刷新统计与状态摘要
         _timer = new DispatcherTimerEx(TimeSpan.FromSeconds(1), RefreshStats);
@@ -47,6 +53,51 @@ public partial class MainViewModel : ObservableObject
         RebuildMappings();
         RefreshStats();
     }
+
+    // ---------- 自动升级 ----------
+
+    private void InitializeUpdate()
+    {
+        var updater = new UpdateService(new AppUpdateEnvironment());
+        Update = new UpdateViewModel(updater, SkippedVersionStore.Load());
+
+        // 属性转发（横幅绑定在 MainViewModel 上）
+        Update.PropertyChanged += (_, e) =>
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(Update.UpdateBannerVisible): UpdateBannerVisible = Update.UpdateBannerVisible; break;
+                case nameof(Update.UpdateBannerTitle): UpdateBannerTitle = Update.UpdateBannerTitle; break;
+                case nameof(Update.UpdateBannerMessage): UpdateBannerMessage = Update.UpdateBannerMessage; break;
+            }
+        };
+
+        // 命令委托
+        _updateNowCommand = new AsyncRelayCommand(() => Update.UpdateNowAsync());
+        _skipVersionCommand = new RelayCommand(() => Update.SkipVersion());
+
+        // 启动后 30 秒自动检查（用户关闭开关则不查）；之后每 6 小时一次
+        if (AppServices.Settings.General.AutoCheckUpdates)
+        {
+            _ = System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30));
+                var v = await Update.CheckSilentlyAsync();
+                if (v is not null)
+                {
+                    UpdateBannerVisible = true;
+                    LogX.Info($"发现新版本 v{v}");
+                }
+            });
+        }
+    }
+
+    private AsyncRelayCommand? _updateNowCommand;
+    public IAsyncRelayCommand UpdateNowCommand => _updateNowCommand ??= new AsyncRelayCommand(
+        () => Update?.UpdateNowAsync() ?? Task.CompletedTask);
+    private RelayCommand? _skipVersionCommand;
+    public IRelayCommand SkipVersionCommand => _skipVersionCommand ??= new RelayCommand(
+        () => Update?.SkipVersion());
 
     private static string BuildLocalIpSummary()
     {

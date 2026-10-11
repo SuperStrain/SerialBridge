@@ -16,6 +16,9 @@ public sealed class GeneralSettings
     public bool CloseToTray { get; set; }
 
     public int LogRetentionDays { get; set; } = 30;
+
+    /// <summary>自动检查更新（GitHub Releases）。</summary>
+    public bool AutoCheckUpdates { get; set; } = true;
 }
 
 /// <summary>整个应用的持久化根对象。</summary>

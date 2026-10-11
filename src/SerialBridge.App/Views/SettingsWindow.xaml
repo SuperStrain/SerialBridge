@@ -113,6 +113,13 @@
                                            Text="Windows 串口 ↔ TCP/IP 双向透明转发工具" />
                             </StackPanel>
                         </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <CheckBox IsChecked="{Binding AutoCheckUpdates}" Content="自动检查更新" VerticalAlignment="Center" />
+                            <ui:Button Content="检查更新" Margin="16,0,0,0" Command="{Binding CheckUpdatesCommand}" />
+                            <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       Text="{Binding UpdateStatusText}" />
+                        </StackPanel>
                         <ui:HyperlinkButton Content="GitHub 开源地址（源码 / 问题反馈）"
                                             Margin="0,10,0,0"
                                             NavigateUri="https://github.com/SuperStrain/SerialBridge"
