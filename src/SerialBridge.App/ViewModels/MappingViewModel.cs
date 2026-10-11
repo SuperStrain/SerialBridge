@@ -35,6 +35,7 @@ public partial class MappingViewModel : ObservableObject
     [ObservableProperty] private string _serialSummary = "";
     [ObservableProperty] private string _listenAddress = "";
     [ObservableProperty] private string _accessAddress = "";
+    [ObservableProperty] private string _localAddress = "";
     [ObservableProperty] private string _stateText = "已停止";
     [ObservableProperty] private string _serialStateText = "";
     [ObservableProperty] private string _stateBrush = "GrayBrush";
@@ -59,6 +60,7 @@ public partial class MappingViewModel : ObservableObject
         SerialSummary = Config.SerialSummary;
         ListenAddress = $"{Config.ListenIp}:{Config.ListenPort}";
         AccessAddress = rt.AccessAddress;
+        LocalAddress = $"127.0.0.1:{Config.ListenPort}";
         ClientCount = status.ClientCount;
         ClientsButtonText = $"👥 客户端 {status.ClientCount}";
         RxBytes = status.SerialRxBytes;
@@ -153,6 +155,9 @@ public partial class MappingViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenClients() => ClientsWindow.OpenFor(Runtime);
+
+    [RelayCommand]
+    private void OpenTerminal() => TerminalWindow.OpenFor(Runtime);
 
     [RelayCommand]
     private void Edit() => MainViewModel.RequestEdit?.Invoke(this);

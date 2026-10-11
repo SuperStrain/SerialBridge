@@ -159,6 +159,19 @@ public sealed class MappingRuntime : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 本地（软件界面）直接向设备写入数据（内置串口终端使用）。
+    /// 与 TCP 客户端数据共享同一条 FIFO 写队列，语义与"一个特权本地客户端"一致：
+    /// 不受 TCP 客户端数量限制，计入收发统计与监控。
+    /// </summary>
+    public bool WriteLocal(byte[] data)
+    {
+        if (!IsRunning) return false;
+        Interlocked.Add(ref _serialTxBytes, data.Length);
+        Publish(DataDirection.NetToSerial, data);
+        return _serialWriteQueue.Writer.TryWrite(data);
+    }
+
     /// <summary>串口写任务：按到达顺序逐块写入（SendAsync 内部保证单次 Write 原子）。</summary>
     private async Task SerialWriterLoopAsync(CancellationToken ct)
     {

@@ -90,6 +90,14 @@
                 <TextBox Style="{StaticResource HelpCode}"
                          Text="python3 -c &quot;import socket;s=socket.create_connection(('192.168.1.100',9001));s.sendall(b'AT\r');print(s.recv(256))&quot;" />
 
+                <TextBlock Style="{StaticResource HelpHeading}" Text="本机 Windows 软件访问（Xshell / PuTTY / MobaXterm）" />
+                <TextBlock Style="{StaticResource HelpText}"
+                           Text="本机（Windows 电脑）不需要绕道局域网 IP——直接连接 127.0.0.1:9001 即可，与远程访问完全等价。此外软件自带“串口终端”窗口（映射卡片上的对话框图标），无需任何第三方工具即可直接与设备交互。" />
+                <TextBox Style="{StaticResource HelpCode}"
+                         Text="PuTTY / MobaXterm: 协议选 Raw，主机 127.0.0.1，端口 9001（无协议层，等价真实串口）&#x0a;Xshell:            新建会话，协议选 TELNET，主机 127.0.0.1，端口 9001（文本调试适用）&#x0a;SerialBridge:      映射卡片 → 串口终端按钮（推荐，Tab 补全 / Ctrl+C / 历史命令）" />
+                <TextBlock Style="{StaticResource HelpText}"
+                           Text="注意：SSCom 等仅支持 COM 口的串口工具无法直连 TCP 端口，请使用内置串口终端或上述支持 Raw/Telnet 的终端软件。" />
+
                 <TextBlock Style="{StaticResource HelpHeading}" Text="连接被拒绝 / 无法访问？" />
                 <TextBlock Style="{StaticResource HelpText}"
                            Text="1. 映射默认为单客户端模式：已有客户端在线时新连接会被立即关闭。多台主机需要同时访问时，在映射配置里改用多客户端模式（串口数据会广播给所有客户端，多个客户端写入按先后顺序串行化，但不保证不同客户端的请求响应配对）。" />

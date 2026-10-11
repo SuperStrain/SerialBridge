@@ -102,6 +102,12 @@
                             <TextBlock Margin="16,0,0,0" FontSize="12.5"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                        Text="{Binding SerialStateText}" />
+                            <TextBlock Margin="16,0,0,0" FontSize="12.5"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       ToolTip="本机软件（PuTTY Raw/Xshell Telnet/内置串口终端）可使用的连接地址">
+                                <Run Text="本机连接: " />
+                                <Run Text="{Binding LocalAddress, Mode=OneWay}" FontWeight="Medium" />
+                            </TextBlock>
                         </StackPanel>
 
                         <!-- 错误/提示 -->
@@ -137,6 +143,10 @@
                                    Appearance="{Binding IsRunning, Converter={StaticResource RunToAppearance}}"
                                    Content="{Binding IsRunning, Converter={StaticResource BoolToRunText}}"
                                    MinWidth="76" />
+                        <ui:Button ToolTip="串口终端：在软件内直接与设备交互" Margin="8,0,0,0"
+                                   Command="{Binding OpenTerminalCommand}">
+                            <ui:SymbolIcon Symbol="ChatMultiple24" />
+                        </ui:Button>
                         <ui:Button ToolTip="数据监控" Margin="8,0,0,0" Command="{Binding OpenMonitorCommand}">
                             <ui:SymbolIcon Symbol="ArrowSwap24" />
                         </ui:Button>

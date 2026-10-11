@@ -402,6 +402,27 @@ public sealed class BridgeTests : IAsyncLifetime
         }
     }
 
+
+    [Fact]
+    public async Task WriteLocal_GoesToDeviceAndCounts()
+    {
+        // 内置串口终端场景：本地界面写入与 TCP 客户端共享写队列，且计入统计
+        await using var rt = CreateRuntime();
+        await rt.StartAsync();
+        await WaitSerialOpen(rt);
+        var device = _factory.OpenedStreams.Single();
+
+        Assert.True(rt.WriteLocal(System.Text.Encoding.ASCII.GetBytes("LOCAL-CMD")));
+        await WaitUntil(() => device.DataWrittenByBridge.Count >= 1);
+        Assert.Equal("LOCAL-CMD",
+            System.Text.Encoding.ASCII.GetString(device.DataWrittenByBridge.First()));
+        Assert.Equal(9, rt.SerialTxBytes);
+
+        // 映射停止后本地写入应失败
+        await rt.StopAsync();
+        Assert.False(rt.WriteLocal(new byte[] { 0x01 }));
+    }
+
     // ---------- 辅助 ----------
 
     /// <summary>等待串口打开（FakePortFactory 打开总是成功；Faulted 时直接返回供故障类测试使用）。</summary>
