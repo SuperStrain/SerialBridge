@@ -1,0 +1,92 @@
+<ui:FluentWindow
+    x:Class="SerialBridge.App.Views.ClientsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="客户端详情"
+    Width="720" Height="480"
+    MinWidth="600" MinHeight="360"
+    WindowStartupLocation="CenterOwner"
+    ResizeMode="CanResize"
+    ExtendsContentIntoTitleBar="True"
+    WindowBackdropType="Mica"
+    Icon="pack://application:,,,/Assets/app.ico"
+    Background="{DynamicResource ApplicationBackgroundBrush}">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="{Binding Title}" Padding="8,0" />
+
+        <!-- 汇总 -->
+        <Border Grid.Row="1" Margin="20,8,20,8" Padding="14,10"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8">
+            <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon Symbol="PeopleTeam24" FontSize="16"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13">
+                    <Run Text="当前连接 " /><Run Text="{Binding ClientCount, Mode=OneWay}" FontWeight="Medium" />
+                    <Run Text=" 个 · 累计接入 " /><Run Text="{Binding TotalAccepted, Mode=OneWay}" FontWeight="Medium" />
+                    <Run Text=" 次 · 每秒自动刷新" />
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- 客户端列表 -->
+        <Border Grid.Row="2" Margin="20,0,20,8"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8" ClipToBounds="True">
+            <Grid>
+                <ListView ItemsSource="{Binding Clients}"
+                          BorderThickness="0" Background="Transparent"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          VirtualizingPanel.IsVirtualizing="True">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="远程地址" Width="200"
+                                            DisplayMemberBinding="{Binding Remote}" />
+                            <GridViewColumn Header="连接时间" Width="160"
+                                            DisplayMemberBinding="{Binding ConnectedAtText}" />
+                            <GridViewColumn Header="已连接时长" Width="120"
+                                            DisplayMemberBinding="{Binding DurationText}" />
+                            <GridViewColumn Header="已发送（设备→客户端）" Width="160"
+                                            DisplayMemberBinding="{Binding SentText}" />
+                            <GridViewColumn Header="已接收（客户端→设备）" Width="160"
+                                            DisplayMemberBinding="{Binding RecvText}" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Visibility="{Binding HasClients, Converter={StaticResource InverseBoolToVisibility}}">
+                    <ui:SymbolIcon Symbol="PeopleTeam24" FontSize="30"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    <TextBlock Text="当前没有客户端连接" Margin="0,10,0,0" FontSize="13.5"
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="局域网设备连接后此处会显示实时详情（含历史接入计数）" Margin="0,4,0,0" FontSize="12"
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 底部说明 -->
+        <Border Grid.Row="3" Margin="20,0,20,14" Padding="14,8"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8">
+            <TextBlock FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                       Text="“已发送”为该连接建立后收到的设备数据量；“已接收”为该连接发送到设备的数据量。客户端断开后从列表移除；单客户端模式下被拒绝的新连接不计入列表与累计接入。" />
+        </Border>
+    </Grid>
+</ui:FluentWindow>

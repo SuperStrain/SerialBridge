@@ -49,6 +49,7 @@ public sealed class MappingRuntime : IAsyncDisposable
     public int ClientCount => Volatile.Read(ref _clientCount);
 
     public bool IsRunning => _state is MappingState.Running or MappingState.Starting;
+    public long TotalAcceptedClients => _tcp.TotalAccepted;
 
     /// <summary>状态变化（后台线程触发）。</summary>
     public event Action<MappingRuntime>? StatusChanged;

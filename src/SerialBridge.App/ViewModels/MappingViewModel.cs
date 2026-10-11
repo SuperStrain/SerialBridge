@@ -40,6 +40,7 @@ public partial class MappingViewModel : ObservableObject
     [ObservableProperty] private string _stateBrush = "GrayBrush";
     [ObservableProperty] private string _stateIcon = "\uE946";
     [ObservableProperty] private int _clientCount;
+    [ObservableProperty] private string _clientsButtonText = "客户端 0";
     [ObservableProperty] private long _rxBytes;
     [ObservableProperty] private long _txBytes;
     [ObservableProperty] private bool _isRunning;
@@ -59,6 +60,7 @@ public partial class MappingViewModel : ObservableObject
         ListenAddress = $"{Config.ListenIp}:{Config.ListenPort}";
         AccessAddress = rt.AccessAddress;
         ClientCount = status.ClientCount;
+        ClientsButtonText = $"👥 客户端 {status.ClientCount}";
         RxBytes = status.SerialRxBytes;
         TxBytes = status.SerialTxBytes;
         ModeText = Config.ClientMode == ClientMode.Single
@@ -148,6 +150,9 @@ public partial class MappingViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenMonitor() => MonitorWindow.OpenFor(Runtime);
+
+    [RelayCommand]
+    private void OpenClients() => ClientsWindow.OpenFor(Runtime);
 
     [RelayCommand]
     private void Edit() => MainViewModel.RequestEdit?.Invoke(this);

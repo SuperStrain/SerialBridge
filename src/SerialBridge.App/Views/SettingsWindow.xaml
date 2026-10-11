@@ -73,25 +73,11 @@
                 <Border Style="{StaticResource SettingsRowStyle}">
                     <Grid>
                         <StackPanel>
-                            <TextBlock Text="最小化到系统托盘" FontSize="13.5"
+                            <TextBlock Text="窗口行为" FontSize="13.5"
                                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                            <TextBlock Text="最小化窗口后转入托盘后台运行，映射保持工作" FontSize="11.5"
+                            <TextBlock Text="最小化保留任务栏图标；点击关闭按钮收起到系统托盘（映射保持运行），彻底退出请用托盘右键菜单的“退出”" FontSize="11.5" TextWrapping="Wrap"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
-                        <CheckBox HorizontalAlignment="Right" VerticalAlignment="Center"
-                                  IsChecked="{Binding MinimizeToTray}" />
-                    </Grid>
-                </Border>
-                <Border Style="{StaticResource SettingsRowStyle}">
-                    <Grid>
-                        <StackPanel>
-                            <TextBlock Text="点击关闭按钮时隐藏到托盘" FontSize="13.5"
-                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                            <TextBlock Text="关闭窗口不退出程序（从托盘菜单退出）" FontSize="11.5"
-                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                        </StackPanel>
-                        <CheckBox HorizontalAlignment="Right" VerticalAlignment="Center"
-                                  IsChecked="{Binding CloseToTray}" />
                     </Grid>
                 </Border>
 

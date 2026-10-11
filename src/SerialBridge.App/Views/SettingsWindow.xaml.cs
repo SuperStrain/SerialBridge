@@ -50,16 +50,11 @@ public partial class SettingsViewModel : ObservableObject
         _general = AppServices.Settings.General;
         _themeIndex = _general.Theme switch { "Dark" => 1, "Auto" => 2, _ => 0 };
         _restoreMappingsOnStartup = _general.RestoreMappingsOnStartup;
-        _minimizeToTray = _general.MinimizeToTray;
-        _closeToTray = _general.CloseToTray;
     }
 
     [ObservableProperty] private int _themeIndex;
     [ObservableProperty] private bool _launchOnStartup = StartupHelper.IsLaunchOnStartupEnabled();
     [ObservableProperty] private bool _restoreMappingsOnStartup;
-    [ObservableProperty] private bool _minimizeToTray;
-    [ObservableProperty] private bool _closeToTray;
-
     public string LogDirText => LogService.LogDir;
 
     partial void OnThemeIndexChanged(int value)
@@ -83,18 +78,6 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnRestoreMappingsOnStartupChanged(bool value)
     {
         _general.RestoreMappingsOnStartup = value;
-        AppServices.SaveSettingsSafe();
-    }
-
-    partial void OnMinimizeToTrayChanged(bool value)
-    {
-        _general.MinimizeToTray = value;
-        AppServices.SaveSettingsSafe();
-    }
-
-    partial void OnCloseToTrayChanged(bool value)
-    {
-        _general.CloseToTray = value;
         AppServices.SaveSettingsSafe();
     }
 }

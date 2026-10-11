@@ -28,11 +28,13 @@ public sealed class TcpClientConnection : IDisposable
     private Task? _sendTask;
 
     private long _sentBytes;
+    private long _recvBytes;
 
     public Guid Id { get; } = Guid.NewGuid();
     public string RemoteEndPoint { get; }
     public DateTime ConnectedAtUtc { get; } = DateTime.UtcNow;
     public long SentBytes => Interlocked.Read(ref _sentBytes);
+    public long RecvBytes => Interlocked.Read(ref _recvBytes);
 
     /// <summary>该客户端发来的数据（网络 → 串口方向）。后台线程触发。</summary>
     public event Action<TcpClientConnection, byte[]>? DataReceived;
@@ -95,6 +97,7 @@ public sealed class TcpClientConnection : IDisposable
                     return;
                 }
                 var chunk = buffer.AsSpan(0, n).ToArray();
+                Interlocked.Add(ref _recvBytes, n);
                 DataReceived?.Invoke(this, chunk);
             }
         }
@@ -163,9 +166,11 @@ public sealed class TcpServerService : IAsyncDisposable
     private TcpListener? _listener;
     private Task? _acceptTask;
     private volatile bool _listening;
+    private long _totalAccepted;
 
     public bool IsListening => _listening;
     public int ClientCount => _clients.Count;
+    public long TotalAccepted => Interlocked.Read(ref _totalAccepted);
     public IEnumerable<TcpClientConnection> Clients => _clients.Values;
     public int ListenPort => _config.ListenPort;
 
@@ -245,6 +250,7 @@ public sealed class TcpServerService : IAsyncDisposable
                 }
 
                 var conn = new TcpClientConnection(tcp);
+                Interlocked.Increment(ref _totalAccepted);
                 conn.DataReceived += (c, data) =>
                 {
                     try { DataFromClient?.Invoke(c, data); }

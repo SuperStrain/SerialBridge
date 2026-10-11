@@ -52,46 +52,28 @@ public partial class MainWindow : FluentWindow
 
     private void OnStateChanged(object? sender, EventArgs e)
     {
-        if (WindowState == WindowState.Minimized && AppServices.Settings.General.MinimizeToTray)
-        {
-            Hide();
-            // 首次最小化进托盘时提示去向，避免用户误以为程序已退出
-            if (!_trayHintShown)
-            {
-                _trayHintShown = true;
-                _trayIcon?.ShowNotification("SerialBridge 仍在运行",
-                    "已最小化到系统托盘（屏幕右下角时钟区域），映射保持运行。点击托盘图标可恢复窗口。");
-            }
-        }
+        // 最小化：保留任务栏图标（普通最小化行为），不再隐藏进托盘
     }
 
     private void OnWindowClosing(object? sender, CancelEventArgs e)
     {
-        // 设置为“关闭时隐藏到托盘”且不是从托盘菜单退出时，隐藏窗口
-        if (AppServices.Settings.General.CloseToTray && !_exitFromTray)
+        // 从托盘菜单明确退出：直接关闭
+        if (_exitFromTray)
         {
-            e.Cancel = true;
-            Hide();
+            _viewModel.Shutdown();
+            _trayIcon?.Dispose();
             return;
         }
 
-        if (_exitFromTray) return;
-
-        // 直接关闭：确认（有映射运行时提示）
-        if (AppServices.Manager.RunningCount > 0)
+        // 点击关闭按钮：隐藏到系统托盘（映射继续运行），首次给出气泡提示
+        e.Cancel = true;
+        Hide();
+        if (!_trayHintShown)
         {
-            var result = MessageBox.Show(
-                $"当前有 {AppServices.Manager.RunningCount} 条映射正在运行，退出将断开所有串口与 TCP 连接。\n确定退出吗？",
-                "退出 SerialBridge", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
-            if (result != MessageBoxResult.Yes)
-            {
-                e.Cancel = true;
-                return;
-            }
+            _trayHintShown = true;
+            _trayIcon?.ShowNotification("SerialBridge 仍在运行",
+                "窗口已收起到系统托盘（屏幕右下角时钟区域），映射保持运行。点击托盘图标可恢复窗口，彻底退出请用托盘右键菜单的“退出”。");
         }
-        _viewModel.Shutdown();
-        _trayIcon?.Dispose();
-        System.Windows.Application.Current.Shutdown();
     }
 
     // ---------- 托盘菜单 ----------
@@ -150,9 +132,9 @@ public partial class MainWindow : FluentWindow
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        // 支持 --minimized 启动（开机自启时直接进托盘）
+        // 开机自启（--minimized）时以最小化状态出现在任务栏
         var args = Environment.GetCommandLineArgs();
-        if (args.Contains("--minimized") && AppServices.Settings.General.MinimizeToTray)
+        if (args.Contains("--minimized"))
             WindowState = WindowState.Minimized;
     }
 }

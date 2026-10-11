@@ -114,14 +114,13 @@
 
                     <!-- 统计区 -->
                     <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,20,0">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                            <ui:SymbolIcon Symbol="PeopleTeam24" FontSize="15"
-                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                            <TextBlock Margin="6,0,0,0" FontSize="14" FontWeight="Medium"
-                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}">
-                                <Run Text="{Binding ClientCount, Mode=OneWay}" /><Run Text=" 个客户端" />
-                            </TextBlock>
-                        </StackPanel>
+                        <ui:Button HorizontalAlignment="Right"
+                                   AutomationProperties.AutomationId="OpenClientsButton"
+                                   Appearance="Transparent"
+                                   ToolTip="查看客户端详情"
+                                   Content="{Binding ClientsButtonText, Mode=OneWay}"
+                                   Command="{Binding OpenClientsCommand}"
+                                   Padding="8,4" />
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0" HorizontalAlignment="Right">
                             <TextBlock FontSize="12.5" Foreground="#0E7490">
                                 <Run Text="↓ " /><Run Text="{Binding RxBytes, Mode=OneWay, Converter={StaticResource BytesToText}}" />
