@@ -16,11 +16,14 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="#181825" Padding="14,10">
+        <ui:TitleBar Grid.Row="0" Title="串口终端" Padding="8,0" Background="#181825" Foreground="#DCD7CF" />
+
+        <Border Grid.Row="1" Background="#181825" Padding="14,4,14,10">
             <Grid>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <ui:SymbolIcon Symbol="ChatMultiple24" FontSize="15" Foreground="#89B4FA" />
@@ -40,11 +43,11 @@
         </Border>
 
         <!-- xterm.js 终端（Xshell 级体验：光标、转义序列、逐键透传） -->
-        <Border Grid.Row="1">
+        <Border Grid.Row="2">
             <wv2:WebView2 x:Name="Web" DefaultBackgroundColor="#1E1E2E" />
         </Border>
 
-        <Border Grid.Row="2" Background="#181825" Padding="14,6">
+        <Border Grid.Row="3" Background="#181825" Padding="14,6">
             <TextBlock FontSize="11.5" Foreground="#9399B2"
                        Text="逐键透传模式：所有按键（含 Tab/Ctrl+C/方向键）直接发送到设备，回显由设备决定——与 Xshell 串口一致。复制：选中文字后 Ctrl+Shift+C；粘贴：Ctrl+Shift+V" />
         </Border>

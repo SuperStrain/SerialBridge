@@ -11,10 +11,12 @@
 <body>
 <div id="term"></div>
 <script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
 <script>
   // SerialBridge 内嵌终端：xterm.js 渲染 + 双向桥
   // C# → JS: window.writeB64(base64) 写入设备输出
   // JS → C#: 按键经 term.onData -> postMessage(文本)；二进制经 writeB64 也可反向
+  const fitAddon = new FitAddon.FitAddon();
   const term = new Terminal({
     fontFamily: 'Consolas, "Cascadia Mono", monospace',
     fontSize: 14,
@@ -28,8 +30,15 @@
       selectionBackground: '#494D64',
     },
   });
+  term.loadAddon(fitAddon);
   term.open(document.getElementById('term'));
+  fitAddon.fit();
   term.focus();
+
+  // 窗口/容器尺寸变化时重排终端（修复拖大窗口后画面不跟随）
+  new ResizeObserver(() => {
+    try { fitAddon.fit(); } catch (e) { /* 容器为 0 尺寸时忽略 */ }
+  }).observe(document.getElementById('term'));
 
   // 用户按键（含 Ctrl+C=0x03、方向键 ESC 序列、Tab、Enter=\r）透传给 C#
   term.onData(data => {
