@@ -20,12 +20,17 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="H.NotifyIcon.Wpf" Version="2.3.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
     <PackageReference Include="System.Management" Version="10.0.12" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
   <ItemGroup>
     <Resource Include="Assets/app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Assets/terminal/**/*" CopyToOutputDirectory="PreserveNewest" Link="Assets/terminal/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="xterm.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: transparent; overflow: hidden; }
+  #term { height: 100%; padding: 4px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="term"></div>
+<script src="xterm.js"></script>
+<script>
+  // SerialBridge 内嵌终端：xterm.js 渲染 + 双向桥
+  // C# → JS: window.writeB64(base64) 写入设备输出
+  // JS → C#: 按键经 term.onData -> postMessage(文本)；二进制经 writeB64 也可反向
+  const term = new Terminal({
+    fontFamily: 'Consolas, "Cascadia Mono", monospace',
+    fontSize: 14,
+    cursorBlink: true,
+    convertEol: false,        // 不转换换行：设备自己控制 \r\n
+    scrollback: 5000,
+    theme: {
+      background: '#1E1E2E',
+      foreground: '#DCD7CF',
+      cursor: '#89B4FA',
+      selectionBackground: '#494D64',
+    },
+  });
+  term.open(document.getElementById('term'));
+  term.focus();
+
+  // 用户按键（含 Ctrl+C=0x03、方向键 ESC 序列、Tab、Enter=\r）透传给 C#
+  term.onData(data => {
+    window.chrome.webview.postMessage({ type: 'input', text: data });
+  });
+
+  // 设备输出（base64 承载原始字节）
+  window.writeB64 = function (b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    term.write(bytes);
+    term.scrollToBottom();
+  };
+
+  // 供自动化/测试使用：等价于按键输入
+  window.sendText = function (text) { term.input(text); };
+
+  window.clearTerm = function () { term.clear(); };
+  window.focusTerm = function () { term.focus(); };
+
+  window.chrome.webview.postMessage({ type: 'ready' });
+</script>
+</body>
+</html>
