@@ -136,15 +136,11 @@ public sealed class SerialCaptureService : IDisposable
                 {
                     await WriteEntryAsync(e, ct);
                 }
-                catch (IOException ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentOutOfRangeException)
                 {
+                    // 单块写入失败：丢弃该块并降级重试，绝不终止写线程
                     CloseWriter();
                     SetState(CaptureState.Faulted, $"写入失败：{ex.Message}（每 30 秒自动重试）");
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    CloseWriter();
-                    SetState(CaptureState.Faulted, $"日志文件访问被拒绝：{ex.Message}");
                 }
                 if (State == CaptureState.Faulted)
                 {
@@ -223,7 +219,7 @@ public sealed class SerialCaptureService : IDisposable
             await WriteSegmentAsync(stream, e.Data, start, e.Data.Length - start, ct);
     }
 
-    private async Task WriteSegmentAsync(Stream stream, byte[] data, int offset, int count, CancellationToken ct)
+    private async Task WriteSegmentAsync(Stream stream, byte[] data, int offset, int length, CancellationToken ct)
     {
         if (_lineStart)
         {
@@ -233,22 +229,25 @@ public sealed class SerialCaptureService : IDisposable
             _lineStart = false;
         }
 
-        var slice = data[offset..(offset + count)];
+        var slice = data[offset..(offset + length)];
+        var endsWithLf = length > 0 && slice[^1] == (byte)'\n';
+
         if (_opt.TextEncoding == DataLogTextEncoding.Utf8)
         {
             await stream.WriteAsync(slice, ct);
+            _currentFileSize += length;
         }
         else
         {
+            // GBK 设备：解码后转 UTF-8 写出（行尾以转码后的字节判定）
             var text = Encoding.GetEncoding("GBK").GetString(slice);
             var utf8 = Encoding.UTF8.GetBytes(text);
             await stream.WriteAsync(utf8, ct);
-            count = utf8.Length;
+            _currentFileSize += utf8.Length;
+            endsWithLf = utf8.Length > 0 && utf8[^1] == (byte)'\n';
         }
-        _currentFileSize += count;
 
-        // 段以 LF 结束 → 下一段处于新行行首（将注入时间戳前缀）
-        _lineStart = data[offset + count - 1] == (byte)'\n';
+        _lineStart = endsWithLf;
     }
 
     /// <summary>确保当前写入文件就绪：按天切换、超限分卷、打开失败重试。</summary>
