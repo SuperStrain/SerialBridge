@@ -13,6 +13,13 @@ namespace SerialBridge.App.Services;
 /// </summary>
 public static class AppServices
 {
+    public const string GitHubUrl = "https://github.com/SuperStrain/UartSoftware";
+
+    /// <summary>程序集版本（x.y.z），界面展示用，避免多处硬编码。</summary>
+    public static string AppVersion =>
+        System.Reflection.Assembly.GetExecutingAssembly().GetName().Version is { } v
+            ? $"{v.Major}.{v.Minor}.{v.Build}" : "1.0.0";
+
     private static readonly SemaphoreSlim _saveLock = new(1, 1);
 
     public static AppSettings Settings { get; private set; } = new();

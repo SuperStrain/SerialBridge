@@ -106,16 +106,20 @@
                             <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                                 <TextBlock FontSize="15" FontWeight="SemiBold"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}">
-                                    <Run Text="SerialBridge" /><Run Text="  v1.0.0" />
+                                    <Run Text="SerialBridge" /><Run Text="  v" /><Run Text="{Binding AppVersion, Mode=OneWay}" />
                                 </TextBlock>
                                 <TextBlock FontSize="11.5"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                            Text="Windows 串口 ↔ TCP/IP 双向透明转发工具" />
                             </StackPanel>
                         </StackPanel>
+                        <ui:HyperlinkButton Content="GitHub 开源地址（源码 / 问题反馈）"
+                                            Margin="0,10,0,0"
+                                            NavigateUri="https://github.com/SuperStrain/UartSoftware"
+                                            Click="OnOpenGitHub" />
                         <TextBlock FontSize="11.5" Margin="0,10,0,0" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                   Text="数据目录：%AppData%\SerialBridge（配置与日志）。原始 TCP 透传不包含加密或客户端身份认证，请在可信局域网内使用，并可通过监听地址与防火墙规则控制访问范围。" />
+                                   Text="本软件以 MIT 协议开源。数据目录：%AppData%\SerialBridge（配置与日志）。原始 TCP 透传不包含加密或客户端身份认证，请在可信局域网内使用，并可通过监听地址与防火墙规则控制访问范围。" />
                     </StackPanel>
                 </Border>
             </StackPanel>

@@ -326,8 +326,14 @@
             <Grid Margin="0,10,0,0">
                 <TextBlock FontSize="11.5" HorizontalAlignment="Right"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}">
-                    <Run Text="SerialBridge v1.0.0 · 数据目录 " />
-                    <Run Text="{Binding DataDirText, Mode=OneWay}" />
+                    <Run Text="SerialBridge v" /><Run Text="{Binding AppVersion, Mode=OneWay}" />
+                    <Run Text=" · 数据目录 " /><Run Text="{Binding DataDirText, Mode=OneWay}" />
+                    <Run Text=" · " />
+                    <Hyperlink NavigateUri="https://github.com/SuperStrain/UartSoftware"
+                               RequestNavigate="OnOpenGitHub"
+                               Foreground="#2563EB" ToolTip="在 GitHub 上查看源码与提交问题">
+                        <Run Text="GitHub 开源地址" />
+                    </Hyperlink>
                 </TextBlock>
                 <TextBlock FontSize="11.5" HorizontalAlignment="Left"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}"

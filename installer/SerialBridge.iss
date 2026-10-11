@@ -3,7 +3,7 @@
 ; 前置条件：先执行 dotnet publish 生成 dist\publish 目录（见 docs\编译与打包说明.md）
 
 #define AppName "SerialBridge"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "SerialBridge Project"
 #define AppExeName "SerialBridge.exe"
 

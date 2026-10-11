@@ -38,6 +38,19 @@ public partial class SettingsWindow : FluentWindow
     }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
+
+    private void OnOpenGitHub(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(AppServices.GitHubUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("无法打开浏览器：" + ex.Message, "设置",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 }
 
 /// <summary>设置窗口 ViewModel：直接读写全局 Settings，关闭时由属性 setter 保存。</summary>
@@ -56,6 +69,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _launchOnStartup = StartupHelper.IsLaunchOnStartupEnabled();
     [ObservableProperty] private bool _restoreMappingsOnStartup;
     public string LogDirText => LogService.LogDir;
+    public string AppVersion => AppServices.AppVersion;
 
     partial void OnThemeIndexChanged(int value)
     {

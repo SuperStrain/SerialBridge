@@ -132,6 +132,19 @@ public partial class MainWindow : FluentWindow
     private void OnOpenLinuxAccess(object sender, RoutedEventArgs e)
         => LinuxAccessWindow.Open(this);
 
+    private void OnOpenGitHub(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("无法打开浏览器：" + ex.Message, "SerialBridge",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);

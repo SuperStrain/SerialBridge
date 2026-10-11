@@ -31,6 +31,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _firewallWarningVisible;
     [ObservableProperty] private string _refreshedAtText = "";
     [ObservableProperty] private string _dataDirText = Core.Logging.LogService.AppDataDir;
+    [ObservableProperty] private string _appVersion = Services.AppServices.AppVersion;
 
     private readonly DispatcherTimerEx _timer;
 
