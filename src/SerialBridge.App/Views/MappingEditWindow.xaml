@@ -118,7 +118,7 @@
                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
 
                 <StackPanel Orientation="Horizontal">
-                    <RadioButton GroupName="ClientMode" IsChecked="{Binding IsSingleClient}"
+                    <RadioButton GroupName="ClientMode" IsChecked="{Binding IsSingleClient, Mode=OneWay}"
                                  Command="{Binding SetClientModeSingleCommand}"
                                  Content="单客户端模式（推荐）" />
                     <RadioButton GroupName="ClientMode" Margin="24,0,0,0"

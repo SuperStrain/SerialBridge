@@ -49,4 +49,14 @@ public partial class MonitorWindow : FluentWindow
             };
         }
     }
+
+    private void OnHexModeChecked(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (!_viewModel.ShowHex) _viewModel.ShowHex = true;
+    }
+
+    private void OnAsciiModeChecked(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_viewModel.ShowHex) _viewModel.ShowHex = false;
+    }
 }

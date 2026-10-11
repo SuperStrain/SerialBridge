@@ -79,14 +79,14 @@ public class InverseBoolToVisibilityConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
-/// <summary>布尔取反（two-way）。</summary>
+/// <summary>布尔取反（仅单向使用——ConvertBack 禁止，避免 RadioButton 组 null 写回污染源）。</summary>
 public class InverseBoolConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => value is not true;
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        => value is not true;
+        => throw new NotSupportedException("InverseBoolConverter 仅支持单向绑定；RadioButton 组互斥产生的 null 写回会污染源属性");
 }
 
 /// <summary>bool → FontWeight（选中项加粗）。</summary>
