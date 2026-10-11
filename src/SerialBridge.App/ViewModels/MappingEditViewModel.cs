@@ -15,7 +15,7 @@ public partial class MappingEditViewModel : ObservableObject
     private static readonly int[] CommonBaudRates =
         [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
-    public ObservableCollection<string> PortNames { get; } = new();
+    public ObservableCollection<PortOption> PortOptions { get; } = new();
     public ObservableCollection<int> BaudRateOptions { get; } = new(CommonBaudRates);
     public ObservableCollection<int> DataBitsOptions { get; } = new([5, 6, 7, 8]);
     public ObservableCollection<Parity> ParityOptions { get; } = new(
@@ -88,11 +88,11 @@ public partial class MappingEditViewModel : ObservableObject
     [RelayCommand]
     private void RefreshPortList()
     {
-        var names = SerialPortInfo.GetPortNames();
-        PortNames.Clear();
-        foreach (var n in names) PortNames.Add(n);
-        if (PortNames.Count > 0 && !PortNames.Contains(PortName))
-            PortName = PortNames[0];
+        var options = PortEnumeration.GetPortOptions();
+        PortOptions.Clear();
+        foreach (var o in options) PortOptions.Add(o);
+        if (PortOptions.Count > 0 && PortOptions.All(p => p.Port != PortName))
+            PortName = PortOptions[0].Port;
     }
 
     [RelayCommand]
@@ -109,7 +109,7 @@ public partial class MappingEditViewModel : ObservableObject
 
         if (string.IsNullOrWhiteSpace(Name))
             return Fail("请输入映射名称。");
-        if (!PortNames.Contains(PortName))
+        if (PortOptions.All(p => p.Port != PortName))
             return Fail($"串口 {PortName} 当前不存在，请刷新串口列表后重新选择。");
         if (BaudRate is < 50 or > 4_000_000)
             return Fail("波特率无效（50 – 4,000,000）。");

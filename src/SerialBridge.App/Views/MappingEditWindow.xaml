@@ -38,8 +38,11 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ComboBox IsEditable="True" Text="{Binding PortName, UpdateSourceTrigger=PropertyChanged}"
-                              ItemsSource="{Binding PortNames}" />
+                    <ComboBox IsEditable="False"
+                              ItemsSource="{Binding PortOptions}"
+                              DisplayMemberPath="Display"
+                              SelectedValuePath="Port"
+                              SelectedValue="{Binding PortName, UpdateSourceTrigger=PropertyChanged}" />
                     <ui:Button Grid.Column="1" Margin="8,0,0,0" Content="刷新串口"
                                Command="{Binding RefreshPortListCommand}" />
                 </Grid>
