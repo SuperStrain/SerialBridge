@@ -13,7 +13,7 @@ namespace SerialBridge.App.Services;
 /// </summary>
 public static class AppServices
 {
-    public const string GitHubUrl = "https://github.com/SuperStrain/UartSoftware";
+    public const string GitHubUrl = "https://github.com/SuperStrain/SerialBridge";
 
     /// <summary>程序集版本（x.y.z），界面展示用，避免多处硬编码。</summary>
     public static string AppVersion =>
