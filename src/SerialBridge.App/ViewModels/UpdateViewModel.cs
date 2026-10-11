@@ -23,6 +23,8 @@ public partial class UpdateViewModel : ObservableObject
         _skippedVersion = skippedVersion;
     }
 
+    public UpdateService Updater => _updater;
+
     /// <summary>启动后检查（自动模式，静默失败）。返回检查到的版本（供托盘气泡使用）。</summary>
     public async Task<string?> CheckSilentlyAsync()
     {

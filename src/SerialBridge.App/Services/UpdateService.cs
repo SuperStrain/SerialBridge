@@ -42,11 +42,13 @@ public sealed class UpdateService : IDisposable
     private readonly HttpClient _http;
     private readonly IUpdateEnvironment _env;
     private readonly string _downloadDir;
+    private readonly string _apiUrl;
     private CancellationTokenSource? _downloadCts;
 
-    public UpdateService(IUpdateEnvironment env, string? downloadDirOverride = null)
+    public UpdateService(IUpdateEnvironment env, string? downloadDirOverride = null, string? apiUrlOverride = null)
     {
         _env = env;
+        _apiUrl = apiUrlOverride ?? ReleasesApiUrl;
         _downloadDir = downloadDirOverride
             ?? Path.Combine(Path.GetTempPath(), "SerialBridge", "update");
         _http = new HttpClient();
@@ -92,7 +94,14 @@ public sealed class UpdateService : IDisposable
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            using var resp = await _http.GetAsync(ReleasesApiUrl, cts.Token);
+            using var resp = await _http.GetAsync(_apiUrl, cts.Token);
+            LogX.Info($"检查更新：HTTP {(int)resp.StatusCode}");
+            if ((int)resp.StatusCode == 403)
+            {
+                // GitHub API 匿名限流（60 次/小时/IP）：静默跳过，下个周期重试
+                LogX.Warn("检查更新：GitHub API 限流（403），本周期跳过");
+                return null;
+            }
             if (!resp.IsSuccessStatusCode) return null;
 
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cts.Token));
@@ -102,6 +111,7 @@ public sealed class UpdateService : IDisposable
             if (!root.TryGetProperty("tag_name", out var tagEl)) return null;
 
             var tag = tagEl.GetString() ?? "";
+            LogX.Info($"检查更新：远端 {tag}，本地 {_env.CurrentVersion}");
             if (!IsNewerVersion(_env.CurrentVersion, tag)) return null;
 
             var version = tag.TrimStart('v', 'V');
@@ -142,32 +152,61 @@ public sealed class UpdateService : IDisposable
 
     // ---------- 下载 ----------
 
+    /// <summary>下载中防抖标记（并发点击立即升级时直接拒绝）。</summary>
+    private volatile bool _downloading;
+
     /// <summary>下载安装包；进度经回调（UI 线程自行调度）。可取消；失败返回 null。</summary>
     public async Task<string?> DownloadInstallerAsync(UpdateInfo info,
         IProgress<DownloadProgress>? progress, CancellationToken ct = default)
     {
+        if (_downloading)
+        {
+            LogX.Warn("升级包正在下载中，忽略重复请求。");
+            return null;
+        }
+        _downloading = true;
+        try
+        {
+            return await DownloadInstallerCoreAsync(info, progress, ct);
+        }
+        finally
+        {
+            _downloading = false;
+        }
+    }
+
+    private async Task<string?> DownloadInstallerCoreAsync(UpdateInfo info,
+        IProgress<DownloadProgress>? progress, CancellationToken ct)
+    {
+        // 独立 HttpClient：下载大文件不与检查请求共享连接池，
+        // 避免旧响应流悬挂导致的文件/连接占用
+        using var downloadClient = new HttpClient();
+        downloadClient.Timeout = TimeSpan.FromMinutes(10);
+        downloadClient.DefaultRequestHeaders.UserAgent.ParseAdd("SerialBridge-Updater");
+
         try
         {
             Directory.CreateDirectory(_downloadDir);
             var fileName = Path.GetFileName(new Uri(info.DownloadUrl).LocalPath);
+            // 下载到唯一临时名：旧文件被占用/未释放时不受影响，完成后原子改名
             var target = Path.Combine(_downloadDir, fileName);
+            var tmp = target + $".{Guid.NewGuid():N}.downloading";
 
-            _downloadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            using var resp = await _http.GetAsync(info.DownloadUrl,
-                HttpCompletionOption.ResponseHeadersRead, _downloadCts.Token);
+            using var resp = await downloadClient.GetAsync(info.DownloadUrl,
+                HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
 
             var total = resp.Content.Headers.ContentLength;
-            await using var src = await resp.Content.ReadAsStreamAsync(_downloadCts.Token);
-            await using var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None);
+            await using var src = await resp.Content.ReadAsStreamAsync(ct);
+            await using var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
 
             var buffer = new byte[81920];
             long received = 0;
             var lastReport = DateTime.MinValue;
             int n;
-            while ((n = await src.ReadAsync(buffer, _downloadCts.Token)) > 0)
+            while ((n = await src.ReadAsync(buffer, ct)) > 0)
             {
-                await dst.WriteAsync(buffer.AsMemory(0, n), _downloadCts.Token);
+                await dst.WriteAsync(buffer.AsMemory(0, n), ct);
                 received += n;
                 if (progress is not null && (DateTime.UtcNow - lastReport).TotalMilliseconds > 100)
                 {
@@ -178,28 +217,52 @@ public sealed class UpdateService : IDisposable
             progress?.Report(new DownloadProgress(received, total));
 
             // 基础校验：大小合理且为 PE 文件（MZ 头）
-            if (new FileInfo(target).Length < 10 * 1024 * 1024) return null;
+            if (new FileInfo(tmp).Length < 10 * 1024 * 1024) return null;
             var head = new byte[2];
-            await using (var check = File.OpenRead(target))
+            await using (var check = File.OpenRead(tmp))
             {
                 if (await check.ReadAsync(head) < 2 || head[0] != 'M' || head[1] != 'Z') return null;
             }
-            return target;
+
+            // 原子替换最终文件；旧文件被占用时直接使用新的临时路径（Setup 从哪里运行都可以）
+            try
+            {
+                File.Move(tmp, target, overwrite: true);
+                return target;
+            }
+            catch (IOException)
+            {
+                LogX.Warn("旧升级包被占用，使用新临时文件启动安装。");
+                return tmp;
+            }
         }
         catch (OperationCanceledException)
         {
+            CleanupTempDownloads();
             return null;   // 用户取消
         }
         catch (Exception ex)
         {
             LogX.Warn($"升级包下载失败：{ex.Message}");
+            CleanupTempDownloads();
             return null;
         }
     }
 
+    /// <summary>清理残留的 .downloading 临时文件。</summary>
+    private void CleanupTempDownloads()
+    {
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(_downloadDir, "*.downloading"))
+                File.Delete(f);
+        }
+        catch { /* 清理失败不影响主流程 */ }
+    }
+
     public void CancelDownload()
     {
-        try { _downloadCts?.Cancel(); } catch { }
+        // 取消经由传入的 ct 传播（进度取消即中止下载）
     }
 
     // ---------- 安装接力 ----------

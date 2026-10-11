@@ -58,7 +58,9 @@ public partial class MainViewModel : ObservableObject
 
     private void InitializeUpdate()
     {
-        var updater = new UpdateService(new AppUpdateEnvironment());
+        var apiOverride = Environment.GetEnvironmentVariable("SERIALBRIDGE_UPDATE_API");
+        var updater = new UpdateService(new AppUpdateEnvironment(),
+            apiUrlOverride: string.IsNullOrWhiteSpace(apiOverride) ? null : apiOverride);
         Update = new UpdateViewModel(updater, SkippedVersionStore.Load());
 
         // 属性转发（横幅绑定在 MainViewModel 上）
@@ -82,7 +84,9 @@ public partial class MainViewModel : ObservableObject
             _ = System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(async () =>
             {
                 await Task.Delay(TimeSpan.FromSeconds(30));
+                LogX.Info("自动检查更新：开始");
                 var v = await Update.CheckSilentlyAsync();
+                LogX.Info($"自动检查更新：结果 {(v is null ? "无更新/失败" : "v" + v)}");
                 if (v is not null)
                 {
                     UpdateBannerVisible = true;
