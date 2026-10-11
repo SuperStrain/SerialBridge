@@ -12,16 +12,19 @@ public partial class MappingEditWindow : FluentWindow
 {
     private readonly MappingEditViewModel _viewModel;
 
-    /// <summary>要编辑的映射（null 表示新增）。</summary>
-    public MappingViewModel? EditTarget { get; init; }
-
-    public MappingEditWindow(Window? owner)
+    /// <summary>要编辑的映射（null 表示新增）。必须通过构造参数传入：</summary>
+    /// <remarks>此前经对象初始化器赋值，而构造函数先执行，导致 source 恒为 null、
+    /// 编辑时加载的全是默认值（本 bug 同时是串口被意外改成默认值的根源）。</remarks>
+    public MappingEditWindow(Window? owner, MappingViewModel? editTarget)
     {
         InitializeComponent();
         Owner = owner;
-        _viewModel = new MappingEditViewModel(EditTarget?.Config);
+        EditTarget = editTarget;
+        _viewModel = new MappingEditViewModel(editTarget?.Config);
         DataContext = _viewModel;
     }
+
+    private MappingViewModel? EditTarget { get; }
 
     private void OnSave(object sender, RoutedEventArgs e)
     {

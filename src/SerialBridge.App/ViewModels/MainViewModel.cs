@@ -99,7 +99,7 @@ public partial class MainViewModel : ObservableObject
     private void ShowEditDialog(MappingViewModel? existing)
     {
         var owner = System.Windows.Application.Current.Windows.OfType<Views.MainWindow>().FirstOrDefault();
-        var dialog = new Views.MappingEditWindow(owner) { EditTarget = existing };
+        var dialog = new Views.MappingEditWindow(owner, existing);
         dialog.ShowDialog();
     }
 
