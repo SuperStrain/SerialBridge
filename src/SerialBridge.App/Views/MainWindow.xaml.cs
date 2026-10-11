@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using H.NotifyIcon;
 using SerialBridge.App.Services;
 using SerialBridge.App.ViewModels;
@@ -131,6 +132,13 @@ public partial class MainWindow : FluentWindow
 
     private void OnOpenLinuxAccess(object sender, RoutedEventArgs e)
         => LinuxAccessWindow.Open(this);
+
+    private void OnCaptureBadgeClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: MappingViewModel vm }
+            && vm.OpenCaptureFolderCommand.CanExecute(null))
+            vm.OpenCaptureFolderCommand.Execute(null);
+    }
 
     private void OnOpenGitHub(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
     {

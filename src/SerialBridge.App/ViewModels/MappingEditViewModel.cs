@@ -42,6 +42,12 @@ public partial class MappingEditViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ClientModeIsSingle))]
     private bool _isSingleClient = true;
     [ObservableProperty] private int _maxClients = 8;
+    [ObservableProperty] private bool _dataLogEnabled;
+    [ObservableProperty] private string _dataLogDirectory = "";
+    [ObservableProperty] private int _dataLogFormatIndex;       // 0=文本 1=HEX
+    [ObservableProperty] private int _dataLogEncodingIndex;     // 0=UTF-8 1=GBK（仅文本模式）
+    [ObservableProperty] private string _dataLogRetentionDaysText = "30";
+    [ObservableProperty] private string _dataLogMaxFileMBText = "50";
     [ObservableProperty] private bool _autoReconnect = true;
     [ObservableProperty] private string _reconnectSecondsText = "3";
     [ObservableProperty] private bool _autoStart;
@@ -77,6 +83,12 @@ public partial class MappingEditViewModel : ObservableObject
             _autoReconnect = c.AutoReconnect;
             _reconnectSecondsText = (c.ReconnectIntervalMs / 1000.0).ToString("0.#");
             _autoStart = c.AutoStart;
+            _dataLogEnabled = c.DataLog.Enabled;
+            _dataLogDirectory = c.DataLog.Directory;
+            _dataLogFormatIndex = c.DataLog.Format == DataLogFormat.Hex ? 1 : 0;
+            _dataLogEncodingIndex = c.DataLog.TextEncoding == DataLogTextEncoding.Gbk ? 1 : 0;
+            _dataLogRetentionDaysText = c.DataLog.RetentionDays.ToString();
+            _dataLogMaxFileMBText = c.DataLog.MaxFileMB.ToString();
             OnPropertyChanged(nameof(Name));
         }
     }
@@ -84,6 +96,26 @@ public partial class MappingEditViewModel : ObservableObject
     /// <summary>解析后的波特率（文本无效时返回 -1，由校验报告）。</summary>
     public int BaudRate =>
         int.TryParse(BaudRateText?.Trim(), out var b) ? b : -1;
+
+    partial void OnDataLogEnabledChanged(bool value)
+    {
+        if (value && string.IsNullOrWhiteSpace(DataLogDirectory))
+            PickDataLogDirectory();
+    }
+
+    [RelayCommand]
+    private void PickDataLogDirectory()
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "选择串口日志存储目录",
+            InitialDirectory = string.IsNullOrWhiteSpace(DataLogDirectory)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+                : DataLogDirectory,
+        };
+        if (dlg.ShowDialog() == true)
+            DataLogDirectory = dlg.FolderName;
+    }
 
     [RelayCommand]
     private void RefreshPortList()
@@ -121,6 +153,12 @@ public partial class MappingEditViewModel : ObservableObject
             return Fail("多客户端模式的最大连接数应在 2 – 64 之间。");
         if (!double.TryParse(ReconnectSecondsText, out var secs) || secs < 0.5 || secs > 60)
             return Fail("自动重连间隔应在 0.5 – 60 秒之间。");
+        if (DataLogEnabled && string.IsNullOrWhiteSpace(DataLogDirectory))
+            return Fail("已启用串口日志，但未选择存储目录。");
+        if (!int.TryParse(DataLogRetentionDaysText, out var retention) || retention is < 7 or > 365)
+            return Fail("日志保留天数应在 7 – 365 之间。");
+        if (!int.TryParse(DataLogMaxFileMBText, out var maxFile) || maxFile is < 10 or > 500)
+            return Fail("单日志文件上限应在 10 – 500 MB 之间。");
 
         return new MappingConfig
         {
@@ -138,6 +176,15 @@ public partial class MappingEditViewModel : ObservableObject
             AutoReconnect = AutoReconnect,
             ReconnectIntervalMs = (int)(secs * 1000),
             AutoStart = AutoStart,
+            DataLog = new DataLogConfig
+            {
+                Enabled = DataLogEnabled,
+                Directory = DataLogDirectory,
+                Format = DataLogFormatIndex == 1 ? DataLogFormat.Hex : DataLogFormat.Text,
+                TextEncoding = DataLogEncodingIndex == 1 ? DataLogTextEncoding.Gbk : DataLogTextEncoding.Utf8,
+                RetentionDays = retention,
+                MaxFileMB = maxFile,
+            },
         };
     }
 

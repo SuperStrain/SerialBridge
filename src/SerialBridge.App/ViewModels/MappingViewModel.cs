@@ -36,6 +36,8 @@ public partial class MappingViewModel : ObservableObject
     [ObservableProperty] private string _listenAddress = "";
     [ObservableProperty] private string _accessAddress = "";
     [ObservableProperty] private string _localAddress = "";
+    [ObservableProperty] private string _captureStatusText = "";
+    [ObservableProperty] private bool _hasCaptureStatus;
     [ObservableProperty] private string _stateText = "已停止";
     [ObservableProperty] private string _serialStateText = "";
     [ObservableProperty] private string _stateBrush = "GrayBrush";
@@ -61,6 +63,7 @@ public partial class MappingViewModel : ObservableObject
         ListenAddress = $"{Config.ListenIp}:{Config.ListenPort}";
         AccessAddress = rt.AccessAddress;
         LocalAddress = $"127.0.0.1:{Config.ListenPort}";
+        UpdateCaptureStatus();
         ClientCount = status.ClientCount;
         ClientsButtonText = $"👥 客户端 {status.ClientCount}";
         RxBytes = status.SerialRxBytes;
@@ -120,6 +123,23 @@ public partial class MappingViewModel : ObservableObject
         };
     }
 
+    private void UpdateCaptureStatus()
+    {
+        var cap = Runtime.Capture;
+        HasCaptureStatus = cap is not null;
+        if (cap is null)
+        {
+            CaptureStatusText = "";
+            return;
+        }
+        CaptureStatusText = cap.State switch
+        {
+            Core.Capture.CaptureState.Recording => $"● 记录中 {System.IO.Path.GetFileName(cap.CurrentFile ?? "")}",
+            Core.Capture.CaptureState.DiskShortage => "⚠ 日志暂停：磁盘空间不足",
+            _ => $"⚠ 日志暂停：{cap.StateReason}",
+        };
+    }
+
     private void SetBadge(string text, string brush, string icon, bool fault)
     {
         StateText = text;
@@ -158,6 +178,19 @@ public partial class MappingViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenTerminal() => TerminalWindow.OpenFor(Runtime);
+
+    [RelayCommand]
+    private void OpenCaptureFolder()
+    {
+        var dir = Runtime.Capture?.CurrentFile is { } f ? Path.GetDirectoryName(f) : Config.DataLog.Directory;
+        if (string.IsNullOrWhiteSpace(dir) || !System.IO.Directory.Exists(dir))
+        {
+            MessageBox.Show("日志目录不存在或尚未产生日志。", "串口日志",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dir) { UseShellExecute = true });
+    }
 
     [RelayCommand]
     private void Edit() => MainViewModel.RequestEdit?.Invoke(this);

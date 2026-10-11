@@ -38,6 +38,9 @@ public sealed class MappingConfig
     /// <summary>软件启动时自动启动该映射。</summary>
     public bool AutoStart { get; set; }
 
+    /// <summary>串口日志（数据落盘）配置。</summary>
+    public DataLogConfig DataLog { get; set; } = new();
+
     /// <summary>深拷贝，用于编辑对话框取消时不影响原配置。</summary>
     public MappingConfig Clone() => (MappingConfig)MemberwiseClone();
 
@@ -58,6 +61,7 @@ public sealed class MappingConfig
         AutoReconnect = src.AutoReconnect;
         ReconnectIntervalMs = src.ReconnectIntervalMs;
         AutoStart = src.AutoStart;
+        DataLog = src.DataLog.Clone();
     }
 
     public string SerialSummary => $"{PortName} @ {BaudRate} {DataBits}{ParityToChar()}{(int)StopBits}";

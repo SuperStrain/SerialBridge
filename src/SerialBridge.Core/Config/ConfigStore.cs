@@ -22,6 +22,9 @@ public sealed class ConfigStore
 
     private readonly string _path;
 
+    /// <summary>上次加载是否失败（失败时禁止保存，防止默认配置覆盖用户的原始文件）。</summary>
+    public bool LoadFailed { get; private set; }
+
     public ConfigStore(string? pathOverride = null)
     {
         _path = pathOverride ?? LogService.ConfigFilePath;
@@ -45,6 +48,7 @@ public sealed class ConfigStore
         }
         catch (Exception ex)
         {
+            LoadFailed = true;
             LogX.Error($"配置文件加载失败：{ex.Message}，已备份损坏文件并使用默认配置。", ex);
             try
             {
@@ -58,6 +62,11 @@ public sealed class ConfigStore
 
     public void Save(AppSettings settings)
     {
+        if (LoadFailed)
+        {
+            LogX.Warn("配置上次加载失败，已跳过保存以保护原始配置文件。请修复或删除该文件后重启。");
+            return;
+        }
         try
         {
             var dir = Path.GetDirectoryName(_path);
@@ -92,6 +101,11 @@ public sealed class ConfigStore
             if (string.IsNullOrWhiteSpace(m.PortName) || !m.PortName.ToUpperInvariant().StartsWith("COM"))
                 m.PortName = "COM3";
             if (string.IsNullOrWhiteSpace(m.ListenIp)) m.ListenIp = "0.0.0.0";
+            m.DataLog ??= new DataLogConfig();
+            m.DataLog.RetentionDays = Math.Clamp(m.DataLog.RetentionDays, 7, 365);
+            m.DataLog.MaxFileMB = Math.Clamp(m.DataLog.MaxFileMB, 10, 500);
+            if (m.DataLog.Enabled && string.IsNullOrWhiteSpace(m.DataLog.Directory))
+                m.DataLog.Enabled = false;   // 无目录的启用配置视为未启用
             if (!usedPorts.Add(m.ListenPort))
                 m.ListenPort = FindFreePort(usedPorts); // 防止配置里端口重复导致启动互斥
         }

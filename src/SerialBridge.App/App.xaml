@@ -15,6 +15,7 @@
             <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
             <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
             <conv:InverseBoolConverter x:Key="InverseBool" />
+            <conv:ZeroIndexToBoolConverter x:Key="ZeroIndexToBool" />
             <conv:BytesToTextConverter x:Key="BytesToText" />
             <conv:StringToBrushConverter x:Key="StringToBrush" />
             <conv:BoolToRunTextConverter x:Key="BoolToRunText" />

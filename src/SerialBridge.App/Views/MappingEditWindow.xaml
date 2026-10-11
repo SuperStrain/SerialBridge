@@ -143,6 +143,69 @@
                 </StackPanel>
 
                 <Separator Margin="0,18,0,4" Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                <TextBlock Text="串口日志" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,10"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+
+                <CheckBox IsChecked="{Binding DataLogEnabled}"
+                          Content="启用串口日志（自动落盘保存全部通信数据）" />
+                <StackPanel Margin="24,10,0,0" IsEnabled="{Binding DataLogEnabled}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="{Binding DataLogDirectory, TargetNullValue='（尚未选择存储目录）'}"
+                                   FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   ToolTip="{Binding DataLogDirectory}" />
+                        <ui:Button Grid.Column="1" Content="选择目录" Margin="10,0,0,0"
+                                   Command="{Binding PickDataLogDirectoryCommand}" />
+                    </Grid>
+
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="记录格式" Style="{StaticResource FieldLabelStyle}" />
+                            <ComboBox SelectedIndex="{Binding DataLogFormatIndex}">
+                                <ComboBoxItem Content="文本（Xshell 式会话日志，仅设备输出）" />
+                                <ComboBoxItem Content="HEX（双向 + 时间戳方向标记）" />
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="文本编码" Style="{StaticResource FieldLabelStyle}" />
+                            <ComboBox SelectedIndex="{Binding DataLogEncodingIndex}"
+                                      IsEnabled="{Binding DataLogFormatIndex, Converter={StaticResource ZeroIndexToBool}}">
+                                <ComboBoxItem Content="UTF-8（默认，字节原样保存）" />
+                                <ComboBoxItem Content="GBK（老设备，自动转 UTF-8 存储）" />
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="日志保留天数" Style="{StaticResource FieldLabelStyle}" />
+                            <ui:TextBox Text="{Binding DataLogRetentionDaysText, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="单文件上限（MB）" Style="{StaticResource FieldLabelStyle}" />
+                            <ui:TextBox Text="{Binding DataLogMaxFileMBText, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock FontSize="11.5" Margin="0,10,0,0" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                               Text="文本模式记录设备输出（含用户输入的回显，与 Xshell 日志一致），UTF-8 原样保存零损失；HEX 模式双向记录带时间戳方向标记。日志按天与单文件上限自动轮转，过期自动清理。" />
+                </StackPanel>
+
+                <Separator Margin="0,18,0,4" Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
                 <TextBlock Text="运行选项" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,10"
                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
 

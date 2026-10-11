@@ -75,6 +75,11 @@
                                     <Run Text="● " /><Run Text="{Binding StateText, Mode=OneWay}" />
                                 </TextBlock>
                             </Border>
+                            <TextBlock Margin="8,2,0,0" VerticalAlignment="Center" FontSize="11"
+                                       Foreground="#0891B2" Cursor="Hand"
+                                       MouseLeftButtonDown="OnCaptureBadgeClick"
+                                       ToolTip="点击打开串口日志目录"
+                                       Text="{Binding CaptureStatusText, Mode=OneWay}" />
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">

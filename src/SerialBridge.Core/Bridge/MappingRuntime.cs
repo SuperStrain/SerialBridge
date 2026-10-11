@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using SerialBridge.Core.Capture;
 using SerialBridge.Core.Logging;
 using SerialBridge.Core.Models;
 using SerialBridge.Core.Net;
@@ -50,6 +51,7 @@ public sealed class MappingRuntime : IAsyncDisposable
 
     public bool IsRunning => _state is MappingState.Running or MappingState.Starting;
     public long TotalAcceptedClients => _tcp.TotalAccepted;
+    public SerialCaptureService? Capture { get; private set; }
 
     /// <summary>状态变化（后台线程触发）。</summary>
     public event Action<MappingRuntime>? StatusChanged;
@@ -103,6 +105,23 @@ public sealed class MappingRuntime : IAsyncDisposable
         _serial.Start();
         _writerCts = new CancellationTokenSource();
         _serialWriterTask = Task.Run(() => SerialWriterLoopAsync(_writerCts.Token));
+
+        if (Config.DataLog.Enabled && !string.IsNullOrWhiteSpace(Config.DataLog.Directory))
+        {
+            var capture = new SerialCaptureService(new SerialCaptureOptions
+            {
+                Directory = Config.DataLog.Directory,
+                MappingName = Config.Name,
+                Format = Config.DataLog.Format,
+                TextEncoding = Config.DataLog.TextEncoding,
+                RetentionDays = Config.DataLog.RetentionDays,
+                MaxFileBytes = (long)Config.DataLog.MaxFileMB * 1024 * 1024,
+            });
+            capture.Start();
+            Capture = capture;
+            capture.StateChanged += () => { try { StatusChanged?.Invoke(this); } catch { } };
+            LogX.Info($"映射「{Config.Name}」串口日志已启用：{Config.DataLog.Directory}");
+        }
         _state = MappingState.Running;
         StatusChanged?.Invoke(this);
         LogX.Info($"映射「{Config.Name}」已启动：{Config.PortName} ↔ {Config.ListenIp}:{Config.ListenPort}");
@@ -118,6 +137,8 @@ public sealed class MappingRuntime : IAsyncDisposable
             try { await _serialWriterTask.WaitAsync(TimeSpan.FromSeconds(3)); } catch { }
             _serialWriterTask = null;
         }
+        Capture?.Dispose();
+        Capture = null;
         await _serial.StopAsync();
         await _tcp.StopAsync();
         _state = MappingState.Stopped;
@@ -145,6 +166,7 @@ public sealed class MappingRuntime : IAsyncDisposable
     {
         Interlocked.Add(ref _serialRxBytes, data.Length);
         Publish(DataDirection.SerialToNet, data);
+        Capture?.Enqueue(DataDirection.SerialToNet, data);
         _tcp.Broadcast(data);
     }
 
@@ -152,6 +174,7 @@ public sealed class MappingRuntime : IAsyncDisposable
     {
         Interlocked.Add(ref _serialTxBytes, data.Length);
         Publish(DataDirection.NetToSerial, data);
+        Capture?.Enqueue(DataDirection.NetToSerial, data);
         if (!_serialWriteQueue.Writer.TryWrite(data))
         {
             // 队列满：写串口长期阻塞（如流控卡死）时保护内存，丢弃并记录
@@ -169,6 +192,7 @@ public sealed class MappingRuntime : IAsyncDisposable
         if (!IsRunning) return false;
         Interlocked.Add(ref _serialTxBytes, data.Length);
         Publish(DataDirection.NetToSerial, data);
+        Capture?.Enqueue(DataDirection.NetToSerial, data);
         return _serialWriteQueue.Writer.TryWrite(data);
     }
 
