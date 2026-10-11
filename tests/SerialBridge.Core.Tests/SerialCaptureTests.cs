@@ -91,6 +91,7 @@ public sealed class SerialCaptureTests : IDisposable
         var content = File.ReadAllText(WaitForFile(_dir));
         Assert.Contains("OUT-DATA", content);
         Assert.DoesNotContain("IN-DATA", content);
+        Assert.Contains("[2026-10-11 12:00:00.000] OUT-DATA", content);   // 行首时间戳
     }
 
     [Fact]
@@ -106,6 +107,7 @@ public sealed class SerialCaptureTests : IDisposable
 
         var content = File.ReadAllText(WaitForFile(_dir));   // UTF-8 读取
         Assert.Contains("中文测试", content);                 // 已转 UTF-8 且内容正确
+        Assert.Contains("[2026-10-11 12:00:00.000] ", content);  // 行首时间戳前缀
     }
 
     [Fact]

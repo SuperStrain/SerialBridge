@@ -53,6 +53,7 @@ public sealed class SerialCaptureService : IDisposable
     private int _currentDate;                 // yyyyMMdd 整数
     private int _currentVolume;               // 同日分卷号
     private int _lastCleanupDate;
+    private bool _lineStart = true;   // 写入位置是否处于行首（用于按行注入时间戳）
     private volatile CaptureState _state = CaptureState.Recording;
     private string? _stateReason;
     private long _droppedBlocks;
@@ -172,7 +173,7 @@ public sealed class SerialCaptureService : IDisposable
         if (_opt.Format == DataLogFormat.Text)
         {
             if (e.Direction != DataDirection.SerialToNet) return;   // 文本模式仅 OUT
-            await WriteTextAsync(e, ct);
+            await WriteTextWithTimestampsAsync(e, ct);
         }
         else
         {
@@ -202,21 +203,52 @@ public sealed class SerialCaptureService : IDisposable
         }
     }
 
-    private async Task WriteTextAsync(CaptureEntry e, CancellationToken ct)
+    /// <summary>
+    /// 文本模式写入：按行注入时间戳前缀（[yyyy-MM-dd HH:mm:ss.fff] ），
+    /// 正文内容保持原样（UTF-8 原始字节 / GBK 转码），跨块续行不重复加前缀。
+    /// </summary>
+    private async Task WriteTextWithTimestampsAsync(CaptureEntry e, CancellationToken ct)
     {
+        var stream = _writer!.BaseStream;
+        var start = 0;
+        for (var i = 0; i < e.Data.Length; i++)
+        {
+            if (e.Data[i] == (byte)'\n')
+            {
+                await WriteSegmentAsync(stream, e.Data, start, i + 1, ct);
+                start = i + 1;
+            }
+        }
+        if (start < e.Data.Length)
+            await WriteSegmentAsync(stream, e.Data, start, e.Data.Length - start, ct);
+    }
+
+    private async Task WriteSegmentAsync(Stream stream, byte[] data, int offset, int count, CancellationToken ct)
+    {
+        if (_lineStart)
+        {
+            var prefix = Encoding.UTF8.GetBytes($"[{_opt.Clock():yyyy-MM-dd HH:mm:ss.fff}] ");
+            await stream.WriteAsync(prefix, ct);
+            _currentFileSize += prefix.Length;
+            _lineStart = false;
+        }
+
+        var slice = data[offset..(offset + count)];
         if (_opt.TextEncoding == DataLogTextEncoding.Utf8)
         {
-            // UTF-8：原样写原始字节（零转换、零损失）
-            await _writer!.BaseStream.WriteAsync(e.Data, ct);
-            _currentFileSize += e.Data.Length;
+            await stream.WriteAsync(slice, ct);
         }
         else
         {
-            // GBK 设备：按 GBK 解码后转 UTF-8 写出
-            var text = Encoding.GetEncoding("GBK").GetString(e.Data);
-            await _writer!.WriteAsync(text);
-            _currentFileSize += Encoding.UTF8.GetByteCount(text);
+            var text = Encoding.GetEncoding("GBK").GetString(slice);
+            var utf8 = Encoding.UTF8.GetBytes(text);
+            await stream.WriteAsync(utf8, ct);
+            count = utf8.Length;
         }
+        _currentFileSize += count;
+
+        // 段以 LF 结束 → 下一段处于新行行首（将注入时间戳前缀）
+        _lineStart = data[offset + count - 1] == (byte)'\n';
     }
 
     /// <summary>确保当前写入文件就绪：按天切换、超限分卷、打开失败重试。</summary>
