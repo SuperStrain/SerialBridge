@@ -10,10 +10,10 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>SerialBridge.App</RootNamespace>
     <AssemblyName>SerialBridge</AssemblyName>
-    <Version>1.2.0</Version>
-    <FileVersion>1.2.0</FileVersion>
-    <AssemblyVersion>1.2.0</AssemblyVersion>
-    <InformationalVersion>1.2.0</InformationalVersion>
+    <Version>1.2.1</Version>
+    <FileVersion>1.2.1</FileVersion>
+    <AssemblyVersion>1.2.1</AssemblyVersion>
+    <InformationalVersion>1.2.1</InformationalVersion>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
   </PropertyGroup>
 
