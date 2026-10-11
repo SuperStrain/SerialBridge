@@ -88,7 +88,7 @@ python3 serial_session.py --host 192.168.1.100 --port 9001 raw --hex "4154 0d" -
 需要人盯着看时，把以下命令告诉用户（不要自己起交互终端）：
 
 ```bash
-screen 192.168.1.100 9001                       # 最快；退出: Ctrl+A 然后 K
+screen //telnet 192.168.1.100 9001              # 注意 //telnet；直接写 IP 会报 Cannot exec
 socat PTY,link=/tmp/ttydev,waitslave TCP:192.168.1.100:9001 &   # PTY 方式
 picocom /tmp/ttydev                             # 与真实串口体验一致
 ```

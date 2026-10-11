@@ -17,6 +17,7 @@ public partial class MainWindow : FluentWindow
     private readonly MainViewModel _viewModel = new();
     private TaskbarIcon? _trayIcon;
     private bool _exitFromTray;
+    private static bool _trayHintShown;
 
     public MainWindow()
     {
@@ -54,6 +55,13 @@ public partial class MainWindow : FluentWindow
         if (WindowState == WindowState.Minimized && AppServices.Settings.General.MinimizeToTray)
         {
             Hide();
+            // 首次最小化进托盘时提示去向，避免用户误以为程序已退出
+            if (!_trayHintShown)
+            {
+                _trayHintShown = true;
+                _trayIcon?.ShowNotification("SerialBridge 仍在运行",
+                    "已最小化到系统托盘（屏幕右下角时钟区域），映射保持运行。点击托盘图标可恢复窗口。");
+            }
         }
     }
 
