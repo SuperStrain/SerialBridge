@@ -38,6 +38,16 @@ jobs:
       - name: Inject application icon
         run: python scripts/inject_icon.py dist/publish/SerialBridge.exe src/SerialBridge.App/Assets/app.ico
 
+      # 绿色版：解压到任意目录直接运行 SerialBridge.exe，无需安装
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          [xml]$proj = Get-Content src/SerialBridge.App/SerialBridge.App.csproj
+          $version = $proj.Project.PropertyGroup.Version | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path dist/portable | Out-Null
+          Compress-Archive -Path dist/publish/* -DestinationPath "dist/portable/SerialBridge-Portable-$version-win-x64.zip" -Force
+          Write-Host "portable zip: SerialBridge-Portable-$version-win-x64.zip"
+
       - name: Verify tag matches project version
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
@@ -65,8 +75,10 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SerialBridge-Setup-${{ github.ref_name }}
-          path: dist/installer/*.exe
+          name: SerialBridge-${{ github.ref_name }}
+          path: |
+            dist/installer/*.exe
+            dist/portable/*.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -74,7 +86,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/installer/SerialBridge-Setup-*.exe
+          files: |
+            dist/installer/SerialBridge-Setup-*.exe
+            dist/portable/SerialBridge-Portable-*.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
         env:
