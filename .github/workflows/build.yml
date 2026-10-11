@@ -1,0 +1,81 @@
+name: Build & Release
+
+# 触发条件：
+# - 推送 main：完整构建验证（产物仅存为 Actions artifact，不发 Release）
+# - 推送 v* 标签：完整构建 + 自动创建 GitHub Release（正式发布）
+# - PR 到 main：只跑单元测试
+# - 手动：Actions 页面 workflow_dispatch
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # 创建 Release 需要
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Run unit tests
+        run: dotnet test tests/SerialBridge.Core.Tests -c Debug --nologo
+
+      - name: Publish (self-contained win-x64)
+        run: dotnet publish src/SerialBridge.App -c Release -r win-x64 --self-contained true -o dist/publish --nologo
+
+      # .NET 8 SDK 不会把 ApplicationIcon 写入 apphost exe，需注入（见 scripts/inject_icon.py）
+      - name: Inject application icon
+        run: python scripts/inject_icon.py dist/publish/SerialBridge.exe src/SerialBridge.App/Assets/app.ico
+
+      - name: Verify tag matches project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          [xml]$proj = Get-Content src/SerialBridge.App/SerialBridge.App.csproj
+          $projVersion = $proj.Project.PropertyGroup.Version | Select-Object -First 1
+          if ($tag -ne $projVersion) {
+            throw "标签 v$tag 与 csproj 版本 $projVersion 不一致，请先更新 <Version> 再打标签"
+          }
+          Write-Host "版本校验通过：v$tag"
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = @("C:\Program Files (x86)\Inno Setup 6\ISCC.exe", "C:\Program Files\Inno Setup 6\ISCC.exe") |
+                  Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            Write-Host "Inno Setup 未预装，尝试通过 Chocolatey 安装…"
+            choco install innosetup -y --no-progress
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc installer/SerialBridge.iss
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SerialBridge-Setup-${{ github.ref_name }}
+          path: dist/installer/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/installer/SerialBridge-Setup-*.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
