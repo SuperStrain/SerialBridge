@@ -120,34 +120,66 @@ public sealed class SerialCaptureService : IDisposable
 
     private async Task WriterLoopAsync(CancellationToken ct)
     {
+        // 落盘节奏：高流量时每 64KB flush；无论如何每 500ms flush 一次，
+        // 保证低流量会话的数据最坏 0.5 秒内落盘（断电/崩溃最多丢最近半秒）
+        var flushInterval = TimeSpan.FromMilliseconds(500);
+        var faultCooldownUntil = DateTime.MinValue;
+
         try
         {
-            await foreach (var e in _queue.Reader.ReadAllAsync(ct))
+            while (!ct.IsCancellationRequested)
             {
-                if (State == CaptureState.DiskShortage && !DiskHasSpace())
-                {
-                    continue;   // 磁盘不足暂停：丢弃（保护主链路），恢复后重新开始记录
-                }
-                if (State == CaptureState.DiskShortage)
-                {
-                    SetState(CaptureState.Recording, null);   // 空间恢复
-                }
+                var wrote = false;
+
                 try
                 {
-                    await WriteEntryAsync(e, ct);
+                    // 最多等一个 flush 周期；期间有数据立即醒来
+                    var waitTask = _queue.Reader.WaitToReadAsync(ct).AsTask();
+                    var completed = await Task.WhenAny(waitTask, Task.Delay(flushInterval, ct));
+                    if (completed == waitTask && waitTask.Result)
+                    {
+                        while (_queue.Reader.TryRead(out var e))
+                        {
+                            if (State == CaptureState.DiskShortage)
+                            {
+                                if (!DiskHasSpace()) continue;      // 仍不足：丢弃（保护主链路）
+                                SetState(CaptureState.Recording, null);   // 空间恢复
+                            }
+                            try
+                            {
+                                await WriteEntryAsync(e, ct);
+                                wrote = true;
+                            }
+                            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentOutOfRangeException)
+                            {
+                                // 单块写入失败：丢弃该块并降级重试，绝不终止写线程
+                                CloseWriter();
+                                SetState(CaptureState.Faulted, $"写入失败：{ex.Message}（每 30 秒自动重试）");
+                                LogX.Error($"串口日志写入异常堆栈：{ex}", ex);
+                                faultCooldownUntil = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+                                break;
+                            }
+                        }
+                    }
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentOutOfRangeException)
-                {
-                    // 单块写入失败：丢弃该块并降级重试，绝不终止写线程
-                    CloseWriter();
-                    SetState(CaptureState.Faulted, $"写入失败：{ex.Message}（每 30 秒自动重试）");
-                    LogX.Error($"串口日志写入异常堆栈：{ex}", ex);
-                }
+                catch (OperationCanceledException) { break; }
+
                 if (State == CaptureState.Faulted)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(30), ct);   // 故障重试间隔
-                    SetState(CaptureState.Recording, null);
+                    if (DateTime.UtcNow < faultCooldownUntil)
+                    {
+                        try { await Task.Delay(TimeSpan.FromSeconds(1), ct); }
+                        catch (OperationCanceledException) { break; }
+                        continue;
+                    }
+                    SetState(CaptureState.Recording, null);   // 冷却结束，重试
                 }
+
+                // 周期性 flush（无论本周期是否有新数据）
+                if (_writer is not null && wrote)
+                    await _writer.FlushAsync(CancellationToken.None);
+                else if (_writer is not null)
+                    await _writer.FlushAsync(CancellationToken.None);   // 空闲 flush 幂等，兜底低流量
             }
         }
         catch (OperationCanceledException) { }
