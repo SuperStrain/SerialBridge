@@ -37,11 +37,9 @@
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
                     <RadioButton GroupName="DisplayMode" IsChecked="{Binding ShowHex, Mode=TwoWay}"
-                                 Command="{Binding ToggleHexModeCommand}"
                                  Content="HEX 模式" FontWeight="{Binding ShowHex, Converter={StaticResource BoolToWeight}}" />
                     <RadioButton GroupName="DisplayMode" Margin="4,0,0,0"
                                  IsChecked="{Binding ShowHex, Converter={StaticResource InverseBool}, Mode=TwoWay}"
-                                 Command="{Binding ToggleHexModeCommand}"
                                  Content="ASCII 模式" />
                     <ui:Button Margin="18,0,0,0" MinWidth="72"
                                Content="{Binding Paused, Converter={StaticResource PauseText}}"

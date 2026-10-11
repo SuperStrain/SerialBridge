@@ -180,8 +180,14 @@
                 </StackPanel>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <ui:Button ToolTip="切换深浅主题" Click="OnToggleTheme" Appearance="Secondary">
-                    <ui:SymbolIcon Symbol="WeatherMoon24" x:Name="ThemeIcon" />
+                <ui:Button ToolTip="Linux 主机访问指南（可复制命令）" Click="OnOpenLinuxAccess" Appearance="Secondary">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="BookGlobe24" />
+                        <TextBlock Text="Linux 访问" Margin="6,0,0,0" />
+                    </StackPanel>
+                </ui:Button>
+                <ui:Button ToolTip="切换深浅主题" Margin="8,0,0,0" Click="OnToggleTheme" Appearance="Secondary">
+                    <ui:SymbolIcon Symbol="DarkTheme24" x:Name="ThemeIcon" />
                 </ui:Button>
                 <ui:Button ToolTip="设置" Margin="8,0,0,0" Click="OnOpenSettings" Appearance="Secondary">
                     <ui:SymbolIcon Symbol="Options24" />

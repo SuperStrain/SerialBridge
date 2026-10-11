@@ -22,7 +22,7 @@ public sealed class TcpClientConnection : IDisposable
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
     private readonly Channel<byte[]> _outbox;
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _cts = new();
 
     private Task? _recvTask;
     private Task? _sendTask;
@@ -161,7 +161,7 @@ public sealed class TcpServerService : IAsyncDisposable
 {
     private readonly MappingConfig _config;
     private readonly ConcurrentDictionary<Guid, TcpClientConnection> _clients = new();
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _cts = new();
 
     private TcpListener? _listener;
     private Task? _acceptTask;
@@ -195,6 +195,9 @@ public sealed class TcpServerService : IAsyncDisposable
         var ip = _config.ListenIp == "0.0.0.0"
             ? IPAddress.Any
             : IPAddress.Parse(_config.ListenIp);
+        // 每次启动重建取消令牌：Stop 后 token 已取消，复用会导致重启后 accept 循环立即退出
+        _cts.Dispose();
+        _cts = new CancellationTokenSource();
         _listener = new TcpListener(ip, _config.ListenPort);
         try
         {

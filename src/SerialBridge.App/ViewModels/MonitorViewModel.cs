@@ -44,6 +44,12 @@ public partial class MonitorViewModel : ObservableObject
 
     [ObservableProperty] private string _title = "数据监控";
     [ObservableProperty] private bool _showHex = true;
+
+    partial void OnShowHexChanged(bool value)
+    {
+        foreach (var line in Lines)
+            line.ShowHex = value;
+    }
     [ObservableProperty] private bool _autoScroll = true;
     [ObservableProperty] private bool _paused;
     [ObservableProperty] private long _rxBytes;
@@ -159,14 +165,6 @@ public partial class MonitorViewModel : ObservableObject
     }
 
     // ---------- 命令 ----------
-
-    [RelayCommand]
-    private void ToggleHexMode()
-    {
-        ShowHex = !ShowHex;
-        foreach (var line in Lines)
-            line.ShowHex = ShowHex;
-    }
 
     [RelayCommand]
     private void TogglePause() => Paused = !Paused;

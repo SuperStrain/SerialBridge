@@ -129,6 +129,9 @@ public partial class MainWindow : FluentWindow
         UpdateTrayStatus();
     }
 
+    private void OnOpenLinuxAccess(object sender, RoutedEventArgs e)
+        => LinuxAccessWindow.Open(this);
+
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);

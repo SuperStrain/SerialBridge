@@ -372,6 +372,36 @@ public sealed class BridgeTests : IAsyncLifetime
         Assert.Equal(sent, combined);
     }
 
+
+    [Fact]
+    public async Task RestartMapping_AcceptsClientsAgain()
+    {
+        // 回归：映射停止再启动后，TCP 必须能再次接受客户端并透传
+        await using var rt = CreateRuntime();
+        await rt.StartAsync();
+        await WaitSerialOpen(rt);
+        var device = _factory.OpenedStreams.First();
+
+        using (var c1 = await ConnectAsync(_port))
+        {
+            await WaitUntil(() => rt.ClientCount == 1);
+            await c1.GetStream().WriteAsync(new byte[] { 0x01 });
+            await WaitUntil(() => device.DataWrittenByBridge.Count >= 1);
+        }
+        await WaitUntil(() => rt.ClientCount == 0);
+
+        await rt.StopAsync();
+        await rt.StartAsync();                    // 第二次启动
+        await WaitSerialOpen(rt);
+
+        using (var c2 = await ConnectAsync(_port))
+        {
+            await WaitUntil(() => rt.ClientCount == 1, TimeSpan.FromSeconds(5));
+            await c2.GetStream().WriteAsync(new byte[] { 0x02 });
+            await WaitUntil(() => rt.SerialTxBytes >= 2, TimeSpan.FromSeconds(5));
+        }
+    }
+
     // ---------- 辅助 ----------
 
     /// <summary>等待串口打开（FakePortFactory 打开总是成功；Faulted 时直接返回供故障类测试使用）。</summary>
