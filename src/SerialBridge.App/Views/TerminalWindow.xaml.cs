@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Input;
 using Microsoft.Web.WebView2.Core;
 using SerialBridge.App.ViewModels;
 using SerialBridge.Core.Bridge;
@@ -93,6 +94,33 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_ready) _ = Web.ExecuteScriptAsync("window.clearTerm()");
     }
+
+    // ---------- 自绘标题栏 ----------
+
+    private void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2)
+        {
+            ToggleMaximize();
+            return;
+        }
+        if (e.ButtonState == MouseButtonState.Pressed)
+        {
+            try { DragMove(); } catch (InvalidOperationException) { /* 已在拖动中 */ }
+        }
+    }
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void OnMaximizeClick(object sender, RoutedEventArgs e) => ToggleMaximize();
+
+    private void ToggleMaximize()
+    {
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        MaxRestoreButton.Content = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+    }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
     private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {

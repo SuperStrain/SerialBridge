@@ -13,6 +13,51 @@
     Icon="pack://application:,,,/Assets/app.ico"
     Background="#1E1E2E">
 
+    <ui:FluentWindow.Resources>
+        <!-- 自绘深色标题栏按钮（浅色主题下 ui:TitleBar 的深色图标在深色背景上不可见） -->
+        <Style x:Key="TermCaptionButton" TargetType="Button">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#C8CEDA" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#3B4261" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="TermCloseButton" TargetType="Button" BasedOn="{StaticResource TermCaptionButton}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#D0342C" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </ui:FluentWindow.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -21,8 +66,27 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="串口终端" Padding="8,0" Background="#181825" Foreground="#DCD7CF" />
+        <!-- 自绘深色标题栏：拖动区 + 窗口控制按钮 -->
+        <Border Grid.Row="0" Background="#181825" Height="38"
+                MouseLeftButtonDown="OnTitleBarMouseLeftButtonDown">
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                    <ui:SymbolIcon Symbol="ChatMultiple24" FontSize="14" Foreground="#89B4FA" />
+                    <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="12.5"
+                               Foreground="#DCD7CF" Text="{Binding Title}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Style="{StaticResource TermCaptionButton}" Content="&#xE921;"
+                            ToolTip="最小化" Click="OnMinimizeClick" />
+                    <Button x:Name="MaxRestoreButton" Style="{StaticResource TermCaptionButton}"
+                            Content="&#xE922;" ToolTip="最大化/还原" Click="OnMaximizeClick" />
+                    <Button Style="{StaticResource TermCloseButton}" Content="&#xE8BB;"
+                            ToolTip="关闭（收起到托盘）" Click="OnCloseClick" />
+                </StackPanel>
+            </Grid>
+        </Border>
 
+        <!-- 工具条：状态 + 流量 + 清屏 -->
         <Border Grid.Row="1" Background="#181825" Padding="14,4,14,10">
             <Grid>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -36,7 +100,7 @@
                         <Run Text="↑ " /><Run Text="{Binding TxText, Mode=OneWay}" />
                         <Run Text="  ↓ " /><Run Text="{Binding RxText, Mode=OneWay}" />
                     </TextBlock>
-                    <ui:Button Content="清屏" Appearance="Secondary" Click="OnClearScreen"
+                    <ui:Button Content="清屏" Click="OnClearScreen"
                                ToolTip="清除终端显示（不影响设备）" />
                 </StackPanel>
             </Grid>
