@@ -42,8 +42,11 @@ public partial class UpdateViewModel : ObservableObject
         return info is null ? "已是最新版本" : $"新版本 v{info.Version} 可用";
     }
 
+    private UpdateInfo? _cachedInfo;
+
     private void ShowBanner(UpdateInfo info, bool downloading)
     {
+        _cachedInfo = info;
         UpdateBannerTitle = $"新版本 v{info.Version} 可用";
         UpdateBannerMessage = downloading
             ? "正在下载升级包…"
@@ -57,17 +60,18 @@ public partial class UpdateViewModel : ObservableObject
     [RelayCommand]
     public async Task UpdateNowAsync()
     {
+        LogX.Info($"升级点击：触发，缓存信息 {(_cachedInfo is null ? "无" : "v" + _cachedInfo.Version + " " + _cachedInfo.DownloadUrl)}");
+        var info = _cachedInfo;
+        if (info is null)
+        {
+            // 无缓存（罕见：横幅未经过检查流程）才回退到在线检查
+            info = await _updater.CheckForUpdateAsync();
+            if (info is null) return;
+        }
+
         UpdateBannerTitle = "正在准备升级…";
         UpdateBannerMessage = "";
         UpdateActionVisible = false;
-
-        // 先检查拿到下载地址
-        var info = await _updater.CheckForUpdateAsync();
-        if (info is null)
-        {
-            UpdateBannerVisible = false;
-            return;
-        }
 
         if (info.IsPortableAssetOnly)
         {
