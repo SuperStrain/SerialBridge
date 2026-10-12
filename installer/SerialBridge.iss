@@ -25,6 +25,8 @@ WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
+CloseApplications=yes
+RestartApplications=no
 UninstallDisplayIcon={app}\{#AppExeName}
 MinVersion=10.0
 
@@ -45,6 +47,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Flags: nowait skipifdoesntexist; Check: IsSilentUpdate
 
 [UninstallDelete]
 ; 卸载时不删除 %AppData%\SerialBridge（用户配置与日志），由用户手动决定是否清理
@@ -83,22 +86,9 @@ begin
   end;
 end;
 
-// 安装前若程序正在运行，提示并自动关闭
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  ResultCode: Integer;
+// 自动升级成功后显式启动新版本；普通静默安装不会自动启动。
+function IsSilentUpdate: Boolean;
 begin
-  Result := '';
-  if CheckForMutexes('Global\SerialBridge.SingleInstance') then
-  begin
-    if MsgBox('检测到 SerialBridge 正在运行。是否关闭它以继续安装？', mbConfirmation, MB_YESNO) = IDYES then
-    begin
-      Exec('taskkill', '/IM SerialBridge.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Sleep(500);
-    end
-    else
-    begin
-      Result := '安装已取消：请先退出 SerialBridge 再运行安装程序。';
-    end;
-  end;
+  Result := WizardSilent and
+            (CompareText(ExpandConstant('{param:SERIALBRIDGEUPDATE|0}'), '1') = 0);
 end;

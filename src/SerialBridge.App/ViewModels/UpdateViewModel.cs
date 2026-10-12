@@ -110,7 +110,11 @@ public partial class UpdateViewModel : ObservableObject
 
     public void SkipVersion()
     {
-        _skippedVersion = SkippedVersionStore.Consume();
+        if (_cachedInfo is not null)
+        {
+            _skippedVersion = _cachedInfo.Version;
+            SkippedVersionStore.Save(_skippedVersion);
+        }
         UpdateBannerVisible = false;
     }
 }
@@ -118,21 +122,41 @@ public partial class UpdateViewModel : ObservableObject
 /// <summary>跳过版本的记忆（独立存储，供 App 启动时读取）。</summary>
 public static class SkippedVersionStore
 {
-    private static string Path =>
+    private static string DefaultPath =>
         System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SerialBridge", "skip_version.txt");
 
-    public static string? Load()
+    public static string? Load() => Load(DefaultPath);
+
+    internal static string? Load(string path)
     {
-        try { return File.Exists(Path) ? File.ReadAllText(Path).Trim() : null; }
+        try { return File.Exists(path) ? File.ReadAllText(path).Trim() : null; }
         catch { return null; }
     }
 
-    public static string? Consume()
+    public static bool Save(string version) => Save(version, DefaultPath);
+
+    internal static bool Save(string version, string path)
     {
-        var v = Load();
-        try { if (File.Exists(Path)) File.Delete(Path); } catch { }
-        return v;
+        if (string.IsNullOrWhiteSpace(version)) return false;
+
+        var tempPath = path + ".tmp";
+        try
+        {
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            File.WriteAllText(tempPath, version.Trim());
+            File.Move(tempPath, path, overwrite: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogX.Warn($"保存跳过版本失败：{ex.Message}");
+            return false;
+        }
+        finally
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+        }
     }
 }

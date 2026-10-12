@@ -43,7 +43,7 @@ public sealed class UpdateService : IDisposable
     private readonly IUpdateEnvironment _env;
     private readonly string _downloadDir;
     private readonly string _apiUrl;
-    private CancellationTokenSource? _downloadCts;
+    private static readonly DownloadGate SharedDownloadGate = new();
 
     public UpdateService(IUpdateEnvironment env, string? downloadDirOverride = null, string? apiUrlOverride = null)
     {
@@ -152,27 +152,18 @@ public sealed class UpdateService : IDisposable
 
     // ---------- 下载 ----------
 
-    /// <summary>下载中防抖标记（进程级静态：任何实例触发下载，全部实例均拒绝并发下载）。</summary>
-    private static volatile bool _downloading;
-
     /// <summary>下载安装包；进度经回调（UI 线程自行调度）。可取消；失败返回 null。</summary>
     public async Task<string?> DownloadInstallerAsync(UpdateInfo info,
         IProgress<DownloadProgress>? progress, CancellationToken ct = default)
     {
-        if (_downloading)
+        if (!SharedDownloadGate.TryAcquire(out var downloadLease))
         {
             LogX.Warn("升级包正在下载中，忽略重复请求。");
             return null;
         }
-        _downloading = true;
-        try
-        {
+
+        using (downloadLease)
             return await DownloadInstallerCoreAsync(info, progress, ct);
-        }
-        finally
-        {
-            _downloading = false;
-        }
     }
 
     private async Task<string?> DownloadInstallerCoreAsync(UpdateInfo info,
@@ -184,84 +175,95 @@ public sealed class UpdateService : IDisposable
         downloadClient.Timeout = TimeSpan.FromMinutes(10);
         downloadClient.DefaultRequestHeaders.UserAgent.ParseAdd("SerialBridge-Updater");
 
+        string? tempPath = null;
         try
         {
             Directory.CreateDirectory(_downloadDir);
             var fileName = Path.GetFileName(new Uri(info.DownloadUrl).LocalPath);
             // 下载到唯一临时名：旧文件被占用/未释放时不受影响，完成后原子改名
             var target = Path.Combine(_downloadDir, fileName);
-            var tmp = target + $".{Guid.NewGuid():N}.downloading";
+            tempPath = target + $".{Guid.NewGuid():N}.downloading";
 
             using var resp = await downloadClient.GetAsync(info.DownloadUrl,
                 HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
 
             var total = resp.Content.Headers.ContentLength;
-            await using var src = await resp.Content.ReadAsStreamAsync(ct);
-            await using var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
-
-            var buffer = new byte[81920];
-            long received = 0;
-            var lastReport = DateTime.MinValue;
-            int n;
-            while ((n = await src.ReadAsync(buffer, ct)) > 0)
+            long received;
+            await using (var src = await resp.Content.ReadAsStreamAsync(ct))
+            await using (var dst = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                await dst.WriteAsync(buffer.AsMemory(0, n), ct);
-                received += n;
-                if (progress is not null && (DateTime.UtcNow - lastReport).TotalMilliseconds > 100)
+                var buffer = new byte[81920];
+                received = 0;
+                var lastReport = DateTime.MinValue;
+                int n;
+                while ((n = await src.ReadAsync(buffer, ct)) > 0)
                 {
-                    progress.Report(new DownloadProgress(received, total));
-                    lastReport = DateTime.UtcNow;
+                    await dst.WriteAsync(buffer.AsMemory(0, n), ct);
+                    received += n;
+                    if (progress is not null && (DateTime.UtcNow - lastReport).TotalMilliseconds > 100)
+                    {
+                        progress.Report(new DownloadProgress(received, total));
+                        lastReport = DateTime.UtcNow;
+                    }
                 }
             }
             progress?.Report(new DownloadProgress(received, total));
 
             // 基础校验：大小合理且为 PE 文件（MZ 头）
-            if (new FileInfo(tmp).Length < 10 * 1024 * 1024) return null;
-            var head = new byte[2];
-            await using (var check = File.OpenRead(tmp))
+            if (new FileInfo(tempPath).Length < 10 * 1024 * 1024)
             {
-                if (await check.ReadAsync(head) < 2 || head[0] != 'M' || head[1] != 'Z') return null;
+                TryDelete(tempPath);
+                return null;
+            }
+            var head = new byte[2];
+            await using (var check = File.OpenRead(tempPath))
+            {
+                if (await check.ReadAsync(head) < 2 || head[0] != 'M' || head[1] != 'Z')
+                {
+                    TryDelete(tempPath);
+                    return null;
+                }
             }
 
             // 原子替换最终文件；旧文件被占用（残留句柄/杀软扫描）时
             // 直接使用新临时文件启动安装——下载已完成且校验通过，绝不能丢弃
             try
             {
-                File.Move(tmp, target, overwrite: true);
+                File.Move(tempPath, target, overwrite: true);
+                tempPath = null;
                 return target;
             }
             catch (IOException ex)
             {
                 LogX.Warn($"升级包替换被占用（{ex.Message}），直接使用新临时文件启动安装。");
-                return tmp;
+                return tempPath;
             }
             catch (UnauthorizedAccessException ex)
             {
                 LogX.Warn($"升级包替换被拒绝（{ex.Message}），直接使用新临时文件启动安装。");
-                return tmp;
+                return tempPath;
             }
         }
         catch (OperationCanceledException)
         {
-            CleanupTempDownloads();
+            TryDelete(tempPath);
             return null;   // 用户取消
         }
         catch (Exception ex)
         {
             LogX.Warn($"升级包下载失败：{ex.Message}");
-            CleanupTempDownloads();
+            TryDelete(tempPath);
             return null;
         }
     }
 
-    /// <summary>清理残留的 .downloading 临时文件。</summary>
-    private void CleanupTempDownloads()
+    private static void TryDelete(string? path)
     {
+        if (path is null) return;
         try
         {
-            foreach (var f in Directory.EnumerateFiles(_downloadDir, "*.downloading"))
-                File.Delete(f);
+            if (File.Exists(path)) File.Delete(path);
         }
         catch { /* 清理失败不影响主流程 */ }
     }
@@ -280,8 +282,7 @@ public sealed class UpdateService : IDisposable
     {
         try
         {
-            var mode = _env.IsPerUserInstall ? "CURRENTUSER" : "ALLUSERS";
-            var args = $"/SILENT /SUPPRESSMSGBOXES /NORESTART /{mode} /RESTARTAPPLICATIONS";
+            var args = BuildInstallerArguments(_env.IsPerUserInstall);
             var psi = new ProcessStartInfo(setupPath, args)
             {
                 UseShellExecute = true,   // 触发 UAC（ALLUSERS 场景）
@@ -293,6 +294,13 @@ public sealed class UpdateService : IDisposable
             LogX.Warn($"启动升级安装器失败：{ex.Message}");
             return false;
         }
+    }
+
+    internal static string BuildInstallerArguments(bool perUserInstall)
+    {
+        var mode = perUserInstall ? "CURRENTUSER" : "ALLUSERS";
+        return $"/SILENT /SUPPRESSMSGBOXES /NORESTART /{mode} " +
+               "/CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /SERIALBRIDGEUPDATE=1";
     }
 
     /// <summary>打开下载页（绿色版 / 兜底路径）。</summary>
