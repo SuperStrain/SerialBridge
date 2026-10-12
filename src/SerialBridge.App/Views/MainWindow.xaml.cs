@@ -63,6 +63,9 @@ public partial class MainWindow : FluentWindow
         {
             _viewModel.Shutdown();
             _trayIcon?.Dispose();
+            // ShutdownMode=OnExplicitShutdown 下仅关窗不会结束进程，必须显式 Shutdown
+            // （否则消息循环仍在，进程残留任务管理器，OnExit 清理也不会执行）
+            Application.Current.Shutdown();
             return;
         }
 
