@@ -90,12 +90,14 @@ public partial class SettingsViewModel : ObservableObject
     {
         if (UpdateService is null) return;
         UpdateStatusText = "检查中…";
-        var info = await UpdateService.CheckForUpdateAsync();
-        if (info is null)
-            UpdateStatusText = "已是最新版本";
-        else
-            UpdateStatusText = $"新版本 v{info.Version} 可用" +
-                (info.IsPortableAssetOnly ? "（请从 GitHub 下载）" : "（可在主界面横幅升级）");
+        var result = await UpdateService.CheckUpdateDetailedAsync();
+        UpdateStatusText = result.Status switch
+        {
+            UpdateCheckStatus.UpdateAvailable => $"新版本 v{result.Info!.Version} 可用" +
+                (result.Info.IsPortableAssetOnly ? "（请从 GitHub 下载）" : "（可在主界面横幅升级）"),
+            UpdateCheckStatus.UpToDate => "已是最新版本",
+            _ => $"检查失败：{result.FailureReason}",
+        };
     }
 
     partial void OnThemeIndexChanged(int value)

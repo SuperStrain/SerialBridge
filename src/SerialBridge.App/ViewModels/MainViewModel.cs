@@ -59,8 +59,10 @@ public partial class MainViewModel : ObservableObject
     private void InitializeUpdate()
     {
         var apiOverride = Environment.GetEnvironmentVariable("SERIALBRIDGE_UPDATE_API");
+        var fallbackOverride = Environment.GetEnvironmentVariable("SERIALBRIDGE_UPDATE_FALLBACK");
         var updater = new UpdateService(new AppUpdateEnvironment(),
-            apiUrlOverride: string.IsNullOrWhiteSpace(apiOverride) ? null : apiOverride);
+            apiUrlOverride: string.IsNullOrWhiteSpace(apiOverride) ? null : apiOverride,
+            fallbackUrlOverride: string.IsNullOrWhiteSpace(fallbackOverride) ? null : fallbackOverride);
         Update = new UpdateViewModel(updater, SkippedVersionStore.Load());
 
         // 属性转发（横幅绑定在 MainViewModel 上）

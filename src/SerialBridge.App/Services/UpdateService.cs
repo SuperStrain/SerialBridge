@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using SerialBridge.Core.Logging;
+using SerialBridge.Core.Update;
 
 namespace SerialBridge.App.Services;
 
@@ -13,6 +15,22 @@ public sealed record UpdateInfo(string Version, string DownloadUrl, string Relea
 public sealed record DownloadProgress(long ReceivedBytes, long? TotalBytes)
 {
     public int Percent => TotalBytes is > 0 ? (int)(ReceivedBytes * 100 / TotalBytes.Value) : 0;
+}
+
+/// <summary>检查结果状态。</summary>
+public enum UpdateCheckStatus
+{
+    UpdateAvailable,
+    UpToDate,
+    CheckFailed,
+}
+
+/// <summary>检查结果：区分"有新版 / 已最新 / 检查失败"，失败附原因供手动检查如实展示。</summary>
+public sealed record UpdateCheckResult(UpdateCheckStatus Status, UpdateInfo? Info, string? FailureReason)
+{
+    public static readonly UpdateCheckResult Latest = new(UpdateCheckStatus.UpToDate, null, null);
+    public static UpdateCheckResult Available(UpdateInfo info) => new(UpdateCheckStatus.UpdateAvailable, info, null);
+    public static UpdateCheckResult Failed(string reason) => new(UpdateCheckStatus.CheckFailed, null, reason);
 }
 
 /// <summary>UpdateService 可测试性注入点。</summary>
@@ -34,27 +52,39 @@ public interface IUpdateEnvironment
 /// </summary>
 public sealed class UpdateService : IDisposable
 {
-    public const string ReleasesApiUrl =
-        "https://api.github.com/repos/SuperStrain/SerialBridge/releases/latest";
+    /// <summary>主检查源：Release 列表（按版本号取最大，不受发布时间乱序影响）。</summary>
+    public const string ReleasesListApiUrl =
+        "https://api.github.com/repos/SuperStrain/SerialBridge/releases?per_page=10";
     public const string ReleasesPageUrl =
         "https://github.com/SuperStrain/SerialBridge/releases/latest";
 
     private readonly HttpClient _http;
+    /// <summary>不跟随重定向的客户端：读取 releases/latest 页面 302 的 Location 提取版本（限流兜底）。</summary>
+    private readonly HttpClient _pageClient;
     private readonly IUpdateEnvironment _env;
     private readonly string _downloadDir;
     private readonly string _apiUrl;
+    private readonly string _fallbackUrl;
     private static readonly DownloadGate SharedDownloadGate = new();
 
-    public UpdateService(IUpdateEnvironment env, string? downloadDirOverride = null, string? apiUrlOverride = null)
+    /// <summary>API 限流退避截止时间（进程级静态：多实例共享同一 IP 配额）。</summary>
+    private static DateTimeOffset? _apiLimitedUntil;
+
+    public UpdateService(IUpdateEnvironment env, string? downloadDirOverride = null,
+        string? apiUrlOverride = null, string? fallbackUrlOverride = null)
     {
         _env = env;
-        _apiUrl = apiUrlOverride ?? ReleasesApiUrl;
+        _apiUrl = apiUrlOverride ?? ReleasesListApiUrl;
+        _fallbackUrl = fallbackUrlOverride ?? ReleasesPageUrl;
         _downloadDir = downloadDirOverride
             ?? Path.Combine(Path.GetTempPath(), "SerialBridge", "update");
         _http = new HttpClient();
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("SerialBridge-Updater");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         _http.Timeout = TimeSpan.FromSeconds(15);   // 仅作用于检查；下载用独立请求
+        _pageClient = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });
+        _pageClient.DefaultRequestHeaders.UserAgent.ParseAdd("SerialBridge-Updater");
+        _pageClient.Timeout = TimeSpan.FromSeconds(10);
     }
 
     // ---------- 版本比较 ----------
@@ -65,88 +95,145 @@ public sealed class UpdateService : IDisposable
     public static bool IsNewerVersion(string current, string candidate) =>
         Core.Update.SemanticVersion.IsNewer(current, candidate);
 
-    private static bool TryParseVersion(string s, out (int Major, int Minor, int Patch) v)
-    {
-        v = (0, 0, 0);
-        if (string.IsNullOrWhiteSpace(s)) return false;
-        var parts = s.Trim().TrimStart('v', 'V').Split('.');
-        if (parts.Length < 2) return false;
-        if (!int.TryParse(parts[0], out var major)) return false;
-        if (!int.TryParse(parts[1], out var minor)) return false;
-        var patch = 0;
-        if (parts.Length >= 3)
-        {
-            var p = parts[2];
-            var dash = p.IndexOf('-');
-            if (dash >= 0) p = p[..dash];
-            if (!int.TryParse(p, out patch)) return false;
-        }
-        v = (major, minor, patch);
-        return true;
-    }
-
     // ---------- 版本检查 ----------
 
-    /// <summary>检查最新版本；返回 null 表示当前已是最新或检查失败（静默）。</summary>
-    public async Task<UpdateInfo?> CheckForUpdateAsync(CancellationToken ct = default)
+    /// <summary>检查最新版本；返回 null 表示当前已是最新或检查失败（静默场景用）。</summary>
+    public async Task<UpdateInfo?> CheckForUpdateAsync(CancellationToken ct = default) =>
+        (await CheckUpdateDetailedAsync(ct)).Info;
+
+    /// <summary>
+    /// 检查最新版本（详细结果）。主路径用 Release 列表按版本号取最大；
+    /// API 限流（403）期间进程级退避并降级走 releases/latest 页面重定向（该路径无 API 配额）。
+    /// </summary>
+    public async Task<UpdateCheckResult> CheckUpdateDetailedAsync(CancellationToken ct = default)
     {
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            if (_apiLimitedUntil > DateTimeOffset.UtcNow)
+            {
+                LogX.Info("检查更新：API 限流退避中，直接走网页兜底");
+                return await CheckViaWebRedirectAsync(cts.Token);
+            }
+
             using var resp = await _http.GetAsync(_apiUrl, cts.Token);
             LogX.Info($"检查更新：HTTP {(int)resp.StatusCode}");
             if ((int)resp.StatusCode == 403)
             {
-                // GitHub API 匿名限流（60 次/小时/IP）：静默跳过，下个周期重试
-                LogX.Warn("检查更新：GitHub API 限流（403），本周期跳过");
-                return null;
+                ReadRateLimitReset(resp);
+                return await CheckViaWebRedirectAsync(cts.Token);
             }
-            if (!resp.IsSuccessStatusCode) return null;
+            if (!resp.IsSuccessStatusCode)
+                return await CheckViaWebRedirectAsync(cts.Token);
 
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cts.Token));
-            var root = doc.RootElement;
-            if (root.TryGetProperty("draft", out var d) && d.GetBoolean()) return null;
-            if (root.TryGetProperty("prerelease", out var pre) && pre.GetBoolean()) return null;
-            if (!root.TryGetProperty("tag_name", out var tagEl)) return null;
+            if (!ReleaseParsing.TrySelectHighestRelease(doc.RootElement, out var release, out var tag))
+                return UpdateCheckResult.Failed("Release 信息解析失败（无有效发布）");
 
-            var tag = tagEl.GetString() ?? "";
             LogX.Info($"检查更新：远端 {tag}，本地 {_env.CurrentVersion}");
-            if (!IsNewerVersion(_env.CurrentVersion, tag)) return null;
+            if (!IsNewerVersion(_env.CurrentVersion, tag)) return UpdateCheckResult.Latest;
 
-            var version = tag.TrimStart('v', 'V');
-            var setupAsset = "SerialBridge-Setup-" + version + "-x64.exe";
-            string? downloadUrl = null;
-
-            if (root.TryGetProperty("assets", out var assets))
-            {
-                foreach (var a in assets.EnumerateArray())
-                {
-                    var name = a.TryGetProperty("name", out var n) ? n.GetString() : null;
-                    if (string.Equals(name, setupAsset, StringComparison.OrdinalIgnoreCase) &&
-                        a.TryGetProperty("browser_download_url", out var u))
-                    {
-                        downloadUrl = u.GetString();
-                        break;
-                    }
-                }
-            }
-
-            // 安装版且找到安装包资产 → 自动升级；否则（绿色版/资产缺失）仅引导下载页
-            var autoUpgradable = _env.IsInstalledBuild && downloadUrl is not null;
-            return new UpdateInfo(version,
-                downloadUrl ?? ReleasesPageUrl,
-                ReleasesPageUrl,
-                IsPortableAssetOnly: !autoUpgradable);
+            JsonElement? assets = release.TryGetProperty("assets", out var a) &&
+                a.ValueKind == JsonValueKind.Array ? a : null;
+            return UpdateCheckResult.Available(BuildInfoFromAssets(tag, assets));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return null;   // 超时：静默
+            return UpdateCheckResult.Failed("检查超时");
         }
         catch (Exception ex)
         {
             LogX.Warn($"检查更新失败：{ex.Message}");
-            return null;
+            return UpdateCheckResult.Failed($"网络错误（{ex.Message}）");
+        }
+    }
+
+    /// <summary>从 Release 的 assets 里找 Setup 安装包，构造 UpdateInfo。</summary>
+    private UpdateInfo BuildInfoFromAssets(string tag, JsonElement? assets)
+    {
+        var version = tag.TrimStart('v', 'V');
+        var setupAsset = "SerialBridge-Setup-" + version + "-x64.exe";
+        string? downloadUrl = null;
+
+        if (assets is { } arr)
+        {
+            foreach (var a in arr.EnumerateArray())
+            {
+                var name = a.TryGetProperty("name", out var n) ? n.GetString() : null;
+                if (string.Equals(name, setupAsset, StringComparison.OrdinalIgnoreCase) &&
+                    a.TryGetProperty("browser_download_url", out var u))
+                {
+                    downloadUrl = u.GetString();
+                    break;
+                }
+            }
+        }
+
+        // 安装版且找到安装包资产 → 自动升级；否则（绿色版/资产缺失）仅引导下载页
+        var autoUpgradable = _env.IsInstalledBuild && downloadUrl is not null;
+        return new UpdateInfo(version,
+            downloadUrl ?? ReleasesPageUrl,
+            ReleasesPageUrl,
+            IsPortableAssetOnly: !autoUpgradable);
+    }
+
+    /// <summary>
+    /// 网页兜底：releases/latest 页面会 302 到 /tag/vX.Y.Z，从 Location 提取最新版本。
+    /// 该路径不走 API 配额（共享代理出口被限流时仍可用）。
+    /// 注意它按发布时间指向（与 /releases/latest API 同源），仅作限流降级，不是主路径。
+    /// </summary>
+    private async Task<UpdateCheckResult> CheckViaWebRedirectAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _pageClient.GetAsync(_fallbackUrl, ct);
+            var location = resp.Headers.Location?.ToString();
+            LogX.Info($"检查更新（网页兜底）：HTTP {(int)resp.StatusCode}，Location {location ?? "无"}");
+            if (string.IsNullOrEmpty(location) || !ReleaseParsing.TryParseTagFromRedirect(location, out var tag))
+                return UpdateCheckResult.Failed("无法获取最新版本（GitHub API 限流且网页兜底未返回版本）");
+
+            LogX.Info($"检查更新（网页兜底）：远端 {tag}，本地 {_env.CurrentVersion}");
+            if (!IsNewerVersion(_env.CurrentVersion, tag)) return UpdateCheckResult.Latest;
+
+            // 兜底路径拿不到 assets 列表，按命名规则构造下载地址；若资产缺失会在下载时失败并提示
+            var version = tag.TrimStart('v', 'V');
+            var repoBase = _fallbackUrl.EndsWith("/releases/latest", StringComparison.OrdinalIgnoreCase)
+                ? _fallbackUrl[..^"/releases/latest".Length]
+                : _fallbackUrl;
+            var downloadUrl = $"{repoBase}/releases/download/{tag}/SerialBridge-Setup-{version}-x64.exe";
+            return UpdateCheckResult.Available(new UpdateInfo(version, downloadUrl, ReleasesPageUrl,
+                IsPortableAssetOnly: !_env.IsInstalledBuild));
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return UpdateCheckResult.Failed("检查超时");
+        }
+        catch (Exception ex)
+        {
+            LogX.Warn($"检查更新（网页兜底）失败：{ex.Message}");
+            return UpdateCheckResult.Failed($"网络错误（{ex.Message}）");
+        }
+    }
+
+    /// <summary>读 x-ratelimit-reset 设置进程级退避窗口；期间不再请求 API（每次 403 也无意义）。</summary>
+    private static void ReadRateLimitReset(HttpResponseMessage resp)
+    {
+        var header = resp.Headers.TryGetValues("x-ratelimit-reset", out var values)
+            ? values.FirstOrDefault() : null;
+        if (long.TryParse(header, out var epoch))
+        {
+            var reset = DateTimeOffset.FromUnixTimeSeconds(epoch).AddSeconds(30);   // 小余量，规避时钟偏差
+            if (reset > _apiLimitedUntil)
+            {
+                _apiLimitedUntil = reset;
+                LogX.Warn($"检查更新：GitHub API 限流（403），退避至 {reset:HH:mm:ss}，期间走网页兜底");
+            }
+        }
+        else
+        {
+            LogX.Warn("检查更新：GitHub API 限流（403），本周期走网页兜底");
         }
     }
 
@@ -306,5 +393,9 @@ public sealed class UpdateService : IDisposable
     /// <summary>打开下载页（绿色版 / 兜底路径）。</summary>
     public void OpenReleasesPage() => _env.OpenUrl(ReleasesPageUrl);
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _http.Dispose();
+        _pageClient.Dispose();
+    }
 }

@@ -35,13 +35,6 @@ public partial class UpdateViewModel : ObservableObject
         return info.Version;
     }
 
-    /// <summary>手动检查（设置页或横幅刷新），返回给设置页的状态文本。</summary>
-    public async Task<string> CheckManuallyAsync()
-    {
-        var info = await _updater.CheckForUpdateAsync();
-        return info is null ? "已是最新版本" : $"新版本 v{info.Version} 可用";
-    }
-
     private UpdateInfo? _cachedInfo;
 
     private void ShowBanner(UpdateInfo info, bool downloading)
