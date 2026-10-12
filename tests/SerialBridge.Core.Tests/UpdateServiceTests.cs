@@ -20,6 +20,9 @@ public class UpdateServiceTests
         Assert.Equal(expected, SemanticVersion.IsNewer(current, candidate));
     }
 
+
+
+
     [Fact]
     public void IsNewerVersion_InvalidInputs_ReturnFalse()
     {

@@ -152,8 +152,8 @@ public sealed class UpdateService : IDisposable
 
     // ---------- 下载 ----------
 
-    /// <summary>下载中防抖标记（并发点击立即升级时直接拒绝）。</summary>
-    private volatile bool _downloading;
+    /// <summary>下载中防抖标记（进程级静态：任何实例触发下载，全部实例均拒绝并发下载）。</summary>
+    private static volatile bool _downloading;
 
     /// <summary>下载安装包；进度经回调（UI 线程自行调度）。可取消；失败返回 null。</summary>
     public async Task<string?> DownloadInstallerAsync(UpdateInfo info,
@@ -224,15 +224,21 @@ public sealed class UpdateService : IDisposable
                 if (await check.ReadAsync(head) < 2 || head[0] != 'M' || head[1] != 'Z') return null;
             }
 
-            // 原子替换最终文件；旧文件被占用时直接使用新的临时路径（Setup 从哪里运行都可以）
+            // 原子替换最终文件；旧文件被占用（残留句柄/杀软扫描）时
+            // 直接使用新临时文件启动安装——下载已完成且校验通过，绝不能丢弃
             try
             {
                 File.Move(tmp, target, overwrite: true);
                 return target;
             }
-            catch (IOException)
+            catch (IOException ex)
             {
-                LogX.Warn("旧升级包被占用，使用新临时文件启动安装。");
+                LogX.Warn($"升级包替换被占用（{ex.Message}），直接使用新临时文件启动安装。");
+                return tmp;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                LogX.Warn($"升级包替换被拒绝（{ex.Message}），直接使用新临时文件启动安装。");
                 return tmp;
             }
         }
