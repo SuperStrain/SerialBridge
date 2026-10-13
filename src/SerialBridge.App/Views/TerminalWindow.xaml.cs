@@ -20,8 +20,9 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
 
     private readonly TerminalViewModel _viewModel;
     private readonly MappingRuntime _runtime;
+    private readonly TerminalWindowLifetime _lifetime = new();
+    private Task? _initializationTask;
     private bool _ready;
-    private bool _closing;
 
     /// <summary>打开（或激活）指定映射的串口终端窗口。</summary>
     public static void OpenFor(MappingRuntime runtime)
@@ -43,12 +44,14 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         _viewModel = new TerminalViewModel(runtime);
         DataContext = _viewModel;
 
-        Loaded += async (_, _) => await InitializeWebViewAsync();
+        Loaded += (_, _) =>
+            _initializationTask ??= InitializeWebViewAsync(_lifetime.Token);
         Closed += (_, _) =>
         {
             _viewModel.Detach();
             _runtime.DataTransferred -= OnDeviceData;
             OpenWindows.Remove(runtime.Config.Id);
+            _ = CleanupWebViewAsync();
         };
         _runtime.DataTransferred += OnDeviceData;
     }
@@ -63,18 +66,21 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        _closing = true;
+        base.OnClosing(e);
+        if (e.Cancel) return;
+
+        _lifetime.BeginClose();
         TerminalWindowPresentation.HideForClose(
+            isCancelled: false,
             () => Web.Visibility = Visibility.Hidden,
             () =>
             {
                 Opacity = 0;
                 Hide();
             });
-        base.OnClosing(e);
     }
 
-    private async Task InitializeWebViewAsync()
+    private async Task InitializeWebViewAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -82,7 +88,9 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "SerialBridge", "WebView2");
             var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+            cancellationToken.ThrowIfCancellationRequested();
             await Web.EnsureCoreWebView2Async(env);
+            cancellationToken.ThrowIfCancellationRequested();
 
             // 本地资源映射（免 HTTP 服务、离线可用）
             var terminalDir = Path.Combine(AppContext.BaseDirectory, "Assets", "terminal");
@@ -91,27 +99,17 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                 CoreWebView2HostResourceAccessKind.Allow);
 
             Web.CoreWebView2.WebMessageReceived += OnWebMessage;
-            Web.CoreWebView2.NavigationCompleted += (_, args) =>
-            {
-                Dispatcher.BeginInvoke(() =>
-                {
-                    if (_closing) return;
-                    if (!args.IsSuccess)
-                    {
-                        TerminalLoadingText.Text = "终端页面加载失败，请关闭后重试。";
-                        return;
-                    }
-
-                    _ready = true;
-                    TerminalWindowPresentation.RevealBrowser(
-                        () => Web.Visibility = Visibility.Visible,
-                        () => TerminalLoadingHost.Visibility = Visibility.Collapsed);
-                    Web.Focus();
-                    // 回放最近输出：从打开时刻起的数据会实时写入，无需回放
-                    _viewModel.StateText = "终端就绪";
-                });
-            };
+            Web.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
+            cancellationToken.ThrowIfCancellationRequested();
             Web.Source = new Uri("https://terminal.serialbridge.local/index.html");
+        }
+        catch (OperationCanceledException) when (_lifetime.IsClosing)
+        {
+            // The user closed the terminal while WebView2 was still initializing.
+        }
+        catch (Exception) when (_lifetime.IsClosing)
+        {
+            // Closing/disposal can make an in-flight WebView2 operation fail; stay silent.
         }
         catch (Exception ex)
         {
@@ -120,6 +118,47 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                 "终端组件初始化失败（可能缺少 Microsoft Edge WebView2 运行时）。\n" +
                 "请安装 WebView2 Runtime 后重试：https://developer.microsoft.com/microsoft-edge/webview2/\n\n" +
                 ex.Message, "串口终端", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs args)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_lifetime.IsClosing) return;
+            if (!args.IsSuccess)
+            {
+                TerminalLoadingText.Text = "终端页面加载失败，请关闭后重试。";
+                return;
+            }
+
+            _ready = true;
+            TerminalWindowPresentation.RevealBrowser(
+                () => Web.Visibility = Visibility.Visible,
+                () => TerminalLoadingHost.Visibility = Visibility.Collapsed);
+            Web.Focus();
+            // 回放最近输出：从打开时刻起的数据会实时写入，无需回放
+            _viewModel.StateText = "终端就绪";
+        });
+    }
+
+    private async Task CleanupWebViewAsync()
+    {
+        try
+        {
+            await _lifetime.DisposeAfterInitializationAsync(_initializationTask, () =>
+            {
+                if (Web.CoreWebView2 is { } core)
+                {
+                    core.WebMessageReceived -= OnWebMessage;
+                    core.NavigationCompleted -= OnNavigationCompleted;
+                }
+                Web.Dispose();
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine("terminal cleanup: " + ex.Message);
         }
     }
 
@@ -222,10 +261,11 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     private void OnDeviceData(SerialBridge.Core.Bridge.MonitorEntry entry)
     {
         if (entry.Direction != SerialBridge.Core.Models.DataDirection.SerialToNet) return;
+        if (_lifetime.IsClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
         var b64 = Convert.ToBase64String(entry.Data);
         Dispatcher.BeginInvoke(() =>
         {
-            if (!_ready || _closing) return;
+            if (!_ready || _lifetime.IsClosing) return;
             _ = Web.ExecuteScriptAsync($"window.writeB64('{b64}')");
             _viewModel.NoteReceived(entry.Data.Length);
         });
@@ -244,9 +284,52 @@ internal static class TerminalWindowPresentation
         hidePlaceholder();
     }
 
-    internal static void HideForClose(Action hideBrowser, Action hideWindow)
+    internal static bool HideForClose(bool isCancelled, Action hideBrowser, Action hideWindow)
     {
+        if (isCancelled) return false;
         hideBrowser();
         hideWindow();
+        return true;
+    }
+}
+
+/// <summary>Coordinates cancellation and deferred WebView2 disposal for one terminal window.</summary>
+internal sealed class TerminalWindowLifetime
+{
+    private readonly CancellationTokenSource _cancellation = new();
+
+    internal bool IsClosing { get; private set; }
+    internal CancellationToken Token => _cancellation.Token;
+
+    internal void BeginClose()
+    {
+        if (IsClosing) return;
+        IsClosing = true;
+        _cancellation.Cancel();
+    }
+
+    internal async Task DisposeAfterInitializationAsync(Task? initialization, Action dispose)
+    {
+        BeginClose();
+        if (initialization is not null)
+        {
+            try
+            {
+                await initialization;
+            }
+            catch
+            {
+                // Cleanup must continue even when initialization ended with an error.
+            }
+        }
+
+        try
+        {
+            dispose();
+        }
+        finally
+        {
+            _cancellation.Dispose();
+        }
     }
 }

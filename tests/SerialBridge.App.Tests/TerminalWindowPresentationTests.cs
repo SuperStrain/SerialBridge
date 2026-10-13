@@ -27,19 +27,50 @@ public sealed class TerminalWindowPresentationTests
     }
 
     [Fact]
-    public void PresentationTransitions_KeepDarkSurfaceUntilBrowserIsReadyAndHideBrowserFirstOnClose()
+    public void PresentationTransitions_KeepDarkSurfaceUntilBrowserIsReadyAndRespectCancelledClose()
     {
         var calls = new List<string>();
 
         TerminalWindowPresentation.RevealBrowser(
             () => calls.Add("show-browser"),
             () => calls.Add("hide-placeholder"));
-        TerminalWindowPresentation.HideForClose(
+        var cancelledClose = TerminalWindowPresentation.HideForClose(
+            isCancelled: true,
+            () => calls.Add("unexpected-hide-browser"),
+            () => calls.Add("unexpected-hide-window"));
+        var acceptedClose = TerminalWindowPresentation.HideForClose(
+            isCancelled: false,
             () => calls.Add("hide-browser"),
             () => calls.Add("hide-window"));
 
+        Assert.False(cancelledClose);
+        Assert.True(acceptedClose);
         Assert.Equal(
             ["show-browser", "hide-placeholder", "hide-browser", "hide-window"],
             calls);
+    }
+
+    [Fact]
+    public async Task Lifetime_CloseCancelsImmediatelyAndWaitsForInitializationBeforeDisposal()
+    {
+        var lifetime = new TerminalWindowLifetime();
+        var initialization = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var disposed = false;
+
+        lifetime.BeginClose();
+        var cleanup = lifetime.DisposeAfterInitializationAsync(
+            initialization.Task,
+            () => disposed = true);
+
+        Assert.True(lifetime.IsClosing);
+        Assert.True(lifetime.Token.IsCancellationRequested);
+        Assert.False(disposed);
+        Assert.False(cleanup.IsCompleted);
+
+        initialization.SetResult();
+        await cleanup;
+
+        Assert.True(disposed);
     }
 }
