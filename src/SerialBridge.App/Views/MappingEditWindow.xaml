@@ -122,7 +122,7 @@
                                  Command="{Binding SetClientModeSingleCommand}"
                                  Content="单客户端模式（推荐）" />
                     <RadioButton GroupName="ClientMode" Margin="24,0,0,0"
-                                 IsChecked="{Binding IsSingleClient, Converter={StaticResource InverseBool}}"
+                                 IsChecked="{Binding IsSingleClient, Converter={StaticResource InverseBool}, Mode=OneWay}"
                                  Command="{Binding SetClientModeMultiCommand}"
                                  Content="多客户端模式（广播）" />
                 </StackPanel>

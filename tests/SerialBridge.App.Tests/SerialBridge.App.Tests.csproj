@@ -21,4 +21,13 @@
     <ProjectReference Include="..\..\src\SerialBridge.App\SerialBridge.App.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\src\SerialBridge.App\Views\MappingEditWindow.xaml"
+             Link="Fixtures\MappingEditWindow.xaml"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\SerialBridge.App\Assets\app.ico"
+             Link="Fixtures\app.ico"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
