@@ -11,6 +11,7 @@
     ExtendsContentIntoTitleBar="True"
     WindowBackdropType="None"
     Icon="pack://application:,,,/Assets/app.ico"
+    Opacity="0"
     Background="#1E1E2E">
 
     <ui:FluentWindow.Resources>
@@ -107,9 +108,20 @@
         </Border>
 
         <!-- xterm.js 终端（Xshell 级体验：光标、转义序列、逐键透传） -->
-        <Border Grid.Row="2">
-            <wv2:WebView2 x:Name="Web" DefaultBackgroundColor="#1E1E2E" />
-        </Border>
+        <Grid Grid.Row="2" Background="#1E1E2E">
+            <Border x:Name="TerminalLoadingHost" Background="#1E1E2E"
+                    IsHitTestVisible="False">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <ProgressBar Width="180" Height="3" IsIndeterminate="True"
+                                 Foreground="#89B4FA" Background="#313244" />
+                    <TextBlock x:Name="TerminalLoadingText" Margin="0,14,0,0"
+                               HorizontalAlignment="Center" FontSize="12.5"
+                               Foreground="#9399B2" Text="正在初始化终端…" />
+                </StackPanel>
+            </Border>
+            <wv2:WebView2 x:Name="Web" Visibility="Hidden"
+                          DefaultBackgroundColor="#1E1E2E" />
+        </Grid>
 
         <Border Grid.Row="3" Background="#181825" Padding="14,6">
             <TextBlock FontSize="11.5" Foreground="#9399B2"

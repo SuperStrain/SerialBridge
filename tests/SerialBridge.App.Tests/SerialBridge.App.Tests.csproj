@@ -25,6 +25,9 @@
     <Content Include="..\..\src\SerialBridge.App\Views\MappingEditWindow.xaml"
              Link="Fixtures\MappingEditWindow.xaml"
              CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\SerialBridge.App\Views\TerminalWindow.xaml"
+             Link="Fixtures\TerminalWindow.xaml"
+             CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\src\SerialBridge.App\Assets\app.ico"
              Link="Fixtures\app.ico"
              CopyToOutputDirectory="PreserveNewest" />

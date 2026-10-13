@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -20,6 +21,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     private readonly TerminalViewModel _viewModel;
     private readonly MappingRuntime _runtime;
     private bool _ready;
+    private bool _closing;
 
     /// <summary>打开（或激活）指定映射的串口终端窗口。</summary>
     public static void OpenFor(MappingRuntime runtime)
@@ -51,6 +53,27 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         _runtime.DataTransferred += OnDeviceData;
     }
 
+    protected override void OnContentRendered(EventArgs e)
+    {
+        base.OnContentRendered(e);
+        // The HWND starts transparent so Windows never presents its default light surface.
+        // At this point WPF has already painted the dark placeholder.
+        Opacity = 1;
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        _closing = true;
+        TerminalWindowPresentation.HideForClose(
+            () => Web.Visibility = Visibility.Hidden,
+            () =>
+            {
+                Opacity = 0;
+                Hide();
+            });
+        base.OnClosing(e);
+    }
+
     private async Task InitializeWebViewAsync()
     {
         try
@@ -68,11 +91,21 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                 CoreWebView2HostResourceAccessKind.Allow);
 
             Web.CoreWebView2.WebMessageReceived += OnWebMessage;
-            Web.CoreWebView2.NavigationCompleted += (_, _) =>
+            Web.CoreWebView2.NavigationCompleted += (_, args) =>
             {
-                _ready = true;
                 Dispatcher.BeginInvoke(() =>
                 {
+                    if (_closing) return;
+                    if (!args.IsSuccess)
+                    {
+                        TerminalLoadingText.Text = "终端页面加载失败，请关闭后重试。";
+                        return;
+                    }
+
+                    _ready = true;
+                    TerminalWindowPresentation.RevealBrowser(
+                        () => Web.Visibility = Visibility.Visible,
+                        () => TerminalLoadingHost.Visibility = Visibility.Collapsed);
                     Web.Focus();
                     // 回放最近输出：从打开时刻起的数据会实时写入，无需回放
                     _viewModel.StateText = "终端就绪";
@@ -82,6 +115,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex)
         {
+            TerminalLoadingText.Text = "终端组件初始化失败。";
             MessageBox.Show(
                 "终端组件初始化失败（可能缺少 Microsoft Edge WebView2 运行时）。\n" +
                 "请安装 WebView2 Runtime 后重试：https://developer.microsoft.com/microsoft-edge/webview2/\n\n" +
@@ -191,9 +225,28 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         var b64 = Convert.ToBase64String(entry.Data);
         Dispatcher.BeginInvoke(() =>
         {
-            if (!_ready) return;
+            if (!_ready || _closing) return;
             _ = Web.ExecuteScriptAsync($"window.writeB64('{b64}')");
             _viewModel.NoteReceived(entry.Data.Length);
         });
+    }
+}
+
+/// <summary>
+/// Orders terminal surface transitions so the dark WPF layer always covers WebView2 creation/destruction.
+/// Kept UI-framework agnostic so the ordering can be regression-tested without starting a window.
+/// </summary>
+internal static class TerminalWindowPresentation
+{
+    internal static void RevealBrowser(Action showBrowser, Action hidePlaceholder)
+    {
+        showBrowser();
+        hidePlaceholder();
+    }
+
+    internal static void HideForClose(Action hideBrowser, Action hideWindow)
+    {
+        hideBrowser();
+        hideWindow();
     }
 }
