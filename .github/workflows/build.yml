@@ -76,7 +76,7 @@ jobs:
           [xml]$project = Get-Content $projectPath
           $projectVersion = [string]($project.Project.PropertyGroup.Version | Select-Object -First 1)
           $installerText = Get-Content $installerPath -Raw
-          $match = [regex]::Match($installerText, '(?m)^#define AppVersion "([^"]+)"$')
+          $match = [regex]::Match($installerText, '(?m)^#define AppVersion "([^"]+)"\r?$')
           if (-not $match.Success) { throw 'Inno Setup AppVersion was not found' }
           $installerVersion = $match.Groups[1].Value
           if ('${{ github.event_name }}' -eq 'schedule') {
@@ -176,13 +176,16 @@ jobs:
             git push origin HEAD:main
             if ($LASTEXITCODE -ne 0) { throw 'Could not push release version to main' }
           } elseif ($LASTEXITCODE -ne 0) { throw 'Git diff failed' }
-          git fetch origin "refs/tags/$tag:refs/tags/$tag" 2>$null
-          if ($LASTEXITCODE -ne 0) {
+          $remoteTag = git ls-remote --tags --refs origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check remote release tag' }
+          if (-not $remoteTag) {
             git tag -a $tag -m "Release $tag"
             if ($LASTEXITCODE -ne 0) { throw 'Tag creation failed' }
             git push origin "refs/tags/$tag"
             if ($LASTEXITCODE -ne 0) { throw 'Tag push failed' }
           } else {
+            git fetch origin "refs/tags/$tag:refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Existing tag fetch failed' }
             $tagSha = (git rev-list -n 1 $tag).Trim()
             $headSha = (git rev-parse HEAD).Trim()
             if ($tagSha -ne $headSha) { throw "Existing $tag points to a different commit" }
