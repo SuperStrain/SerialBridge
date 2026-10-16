@@ -34,6 +34,7 @@ CLI 用法：
 
 import argparse
 import re
+import select
 import socket
 import sys
 import time
@@ -75,46 +76,61 @@ class SerialTcpSession:
         self.connect_timeout = connect_timeout
         self.default_timeout = default_timeout
         self.sock: socket.socket = None
+        self._pending = bytearray()
 
     # ---------- 连接管理 ----------
 
     def connect(self, attempts: int = 3, retry_delay: float = 0.6) -> bool:
-        """
-        建立会话。返回 True = 就绪；False = 端口被占用（单客户端模式拒绝新连接）。
-        占用时 SerialBridge 会立即关闭新连接，表现为 connect 成功但随后立即 EOF。
+        """Connect to SerialBridge. False indicates an immediate peer close.
 
-        上一个客户端刚断开、名额尚未释放时会瞬时被拒，因此默认自动重试
-        attempts 次（间隔 retry_delay）；主机不可达则不重试，直接抛错。
+        Silence is not evidence of an occupied port. A shell or login prompt
+        may arrive later; it is handled when explicitly configured.
         """
+        self.close()
         for i in range(max(1, attempts)):
-            if i > 0:
+            if i:
                 time.sleep(retry_delay)
             try:
                 self.sock = socket.create_connection(
                     (self.host, self.port), timeout=self.connect_timeout)
-            except OSError:
-                raise SerialTcpError(
-                    f"无法连接 {self.host}:{self.port}（主机不可达或映射未启动/端口错误）")
-
-            self.sock.setblocking(False)
-
-            # 占用探测：被拒绝的连接会在片刻内被服务端关闭（EOF）
-            first = self._recv_for(0.4)
-            if first is None:
+                self.sock.setblocking(False)
+                first = self._recv_for(0.4)
+                if first is None:
+                    self.close()
+                    continue
+                self._pending.extend(first)
+                if self.login is not None:
+                    self._login()
+                return True
+            except (SerialTcpError, PromptTimeoutError):
                 self.close()
-                continue
-
-            buf = first
-            # 需要登录的设备：等待 login: 提示并完成登录
-            if LOGIN_RE.search(buf):
-                buf += self._send_and_wait((self.login or "root").encode() + b"\r",
-                                           [PASSWORD_RE], 5.0)
-                if PASSWORD_RE.search(buf):
-                    buf += self._send_and_wait((self.password or "").encode() + b"\r",
-                                               [self.prompt_re], 8.0)
-            return True
-        # 所有尝试均被占用
+                raise
+            except OSError as exc:
+                self.close()
+                raise SerialTcpError(
+                    f"无法连接或初始化 {self.host}:{self.port}: {exc}") from exc
         return False
+
+    def _login(self):
+        """Explicit login: do not claim readiness until a shell prompt arrives."""
+        initial = self._wait_for([LOGIN_RE, self.prompt_re], self.default_timeout)
+        if self.prompt_re.search(initial):
+            self._pending.extend(initial)
+            return
+        response = self._send_and_wait(
+            self.login.encode("utf-8") + b"\\r",
+            [PASSWORD_RE, self.prompt_re, LOGIN_RE], self.default_timeout)
+        if LOGIN_RE.search(response):
+            raise SerialTcpError("设备拒绝用户名")
+        if self.prompt_re.search(response):
+            return  # Passwordless login
+        if self.password is None:
+            raise SerialTcpError("设备需要密码，请提供 --password")
+        result = self._send_and_wait(self.password.encode("utf-8") + b"\\r",
+                                     [self.prompt_re, LOGIN_RE, PASSWORD_RE],
+                                     self.default_timeout)
+        if not self.prompt_re.search(result):
+            raise SerialTcpError("设备未进入 Shell，登录可能失败")
 
     def close(self):
         if self.sock:
@@ -122,50 +138,93 @@ class SerialTcpSession:
                 self.sock.close()
             except OSError:
                 pass
-            self.sock = None
+        self.sock = None
+        self._pending.clear()
 
     # ---------- 底层收发 ----------
 
-    def _recv_for(self, duration: float) -> bytes:
-        """在 duration 秒内读取所有到达数据；连接被对端关闭返回 None。"""
-        buf = b""
-        deadline = time.time() + duration
-        while time.time() < deadline:
-            try:
-                chunk = self.sock.recv(4096)
-            except socket.timeout:
-                continue
-            except BlockingIOError:
-                time.sleep(0.02)
-                continue
-            if chunk == b"":
-                return None
-            buf += chunk
-        return buf
-
-    def _send_and_wait(self, data: bytes, patterns, timeout: float) -> bytes:
-        self.sock.sendall(data)
-        end = time.time() + timeout
-        acc = b""
-        while time.time() < end:
-            chunk = self._recv_for(0.1)
-            if chunk is None:
-                raise SerialTcpError("连接被对端关闭")
-            acc += chunk
-            if any(p.search(acc) for p in patterns):
-                return acc
-        raise PromptTimeoutError(f"等待提示符超时（已收到 {acc[-200:]!r}）")
-
-    def send_raw(self, data: bytes):
-        """原样发送字节（Ctrl+C = b'\\x03'，回车 = b'\\r'）。"""
+    def _recv_for(self, duration: float):
+        """Read for duration seconds; None means EOF. Does not consume _pending."""
         if not self.sock:
             raise SerialTcpError("会话未建立")
-        self.sock.sendall(data)
+        buf = bytearray()
+        end = time.monotonic() + max(0, duration)
+        while True:
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                ready, _, _ = select.select([self.sock], [], [], remaining)
+                if not ready:
+                    break
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    if buf:
+                        self._pending.extend(buf)
+                    return None
+                buf.extend(chunk)
+            except BlockingIOError:
+                continue
+            except OSError as exc:
+                raise SerialTcpError(f"读取串口连接失败: {exc}") from exc
+        return bytes(buf)
+
+    def _wait_for(self, patterns, timeout: float) -> bytes:
+        acc = bytearray(self._pending)
+        self._pending.clear()
+        end = time.monotonic() + timeout
+        while True:
+            for pat in patterns:
+                match = pat.search(acc)
+                if match:
+                    if match.end() < len(acc):
+                        self._pending.extend(acc[match.end():])
+                    return bytes(acc[:match.end()])
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                self._pending[:0] = acc
+                raise PromptTimeoutError(f"等待提示符超时（已收到 {bytes(acc[-200:])!r}）")
+            chunk = self._recv_for(min(remaining, 0.15))
+            if chunk is None:
+                self._pending[:0] = acc
+                raise SerialTcpError("连接被对端关闭")
+            acc.extend(chunk)
+
+    def _send_and_wait(self, data: bytes, patterns, timeout: float) -> bytes:
+        self.send_raw(data)
+        return self._wait_for(patterns, timeout)
+
+    def send_raw(self, data: bytes):
+        """Send raw bytes with timeout and proper handling of partial writes."""
+        if not self.sock:
+            raise SerialTcpError("会话未建立")
+        view = memoryview(data)
+        deadline = time.monotonic() + self.default_timeout
+        try:
+            while view:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise PromptTimeoutError("发送串口数据超时")
+                _, writable, _ = select.select([], [self.sock], [], remaining)
+                if not writable:
+                    raise PromptTimeoutError("发送串口数据超时")
+                sent = self.sock.send(view)
+                if sent == 0:
+                    raise SerialTcpError("连接已关闭，无法发送")
+                view = view[sent:]
+        except OSError as exc:
+            raise SerialTcpError(f"发送串口数据失败: {exc}") from exc
 
     def read_available(self, duration: float = 1.0) -> bytes:
-        """读取 duration 秒内到达的所有数据（被动监听设备主动上报）。"""
-        buf = self._recv_for(duration)
-        return buf or b""
+        buffered = bytes(self._pending)
+        self._pending.clear()
+        incoming = self._recv_for(duration)
+        if incoming is None:
+            # The data already read before EOF remains available to callers.
+            buffered += bytes(self._pending)
+            self._pending.clear()
+            return buffered
+        return buffered + incoming
 
     # ---------- 命令执行 ----------
 
@@ -180,21 +239,19 @@ class SerialTcpSession:
         pat = re.compile(prompt_re.encode()) if prompt_re else self.prompt_re
         t = timeout or self.default_timeout
 
-        self._recv_for(0.15)                      # 丢弃上次残留
-        self.sock.sendall(cmd.encode() + b"\r")   # 串口终端行结束用 \r
-        end = time.time() + t
-        acc = b""
-        while time.time() < end:
-            chunk = self._recv_for(0.1)
-            if chunk is None:
-                raise SerialTcpError("连接被对端关闭")
-            acc += chunk
-            # 提示符必须出现在"输出尾部"才表示命令结束（避免命令输出中碰巧含 # 误判）
-            if pat.search(acc[-120:]):
-                break
-        else:
-            raise PromptTimeoutError(
-                f"命令 {cmd!r} 在 {t}s 内未回到提示符（设备可能仍在输出，可加大超时）")
+        # Preserve unsolicited output rather than discarding it silently.
+        # It remains accessible through read_available() if a command fails.
+        previous = bytes(self._pending)
+        self._pending.clear()
+        try:
+            self.send_raw(cmd.encode() + b"\\r")
+            acc = self._wait_for([pat], t)
+        except (SerialTcpError, PromptTimeoutError):
+            self._pending[:0] = previous
+            raise
+        # Previous asynchronous output is not part of this command response.
+        if previous:
+            self._pending[:0] = previous
 
         text = acc.decode("utf-8", "replace")
         lines = text.splitlines()
@@ -213,7 +270,9 @@ class SerialTcpSession:
         """发送 Ctrl+C 清空设备当前输入行。"""
         self.send_raw(b"\x03")
         time.sleep(0.1)
-        self._recv_for(0.2)
+        response = self._recv_for(0.2)
+        if response:
+            self._pending.extend(response)
 
 
 # ---------- CLI ----------
@@ -246,6 +305,9 @@ def main(argv):
             print("端口被占用：已有其他客户端连接（单客户端模式）。"
                   "请先让对端断开，或在映射配置中改用多客户端模式。", file=sys.stderr)
             return 3
+    except PromptTimeoutError as e:
+        print(f"登录或连接等待超时：{e}", file=sys.stderr)
+        return 4
     except SerialTcpError as e:
         print(f"连接失败：{e}", file=sys.stderr)
         return 2
@@ -264,6 +326,9 @@ def main(argv):
         return 4
     except SerialTcpError as e:
         print(f"错误：{e}", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        print(f"无效输入：{e}", file=sys.stderr)
         return 2
     finally:
         s.close()
