@@ -45,7 +45,18 @@ def version_tuple(value):
 
 def main():
     write_output(eligible="false")
-    release = api(f"https://api.github.com/repos/{REPO}/releases/latest")
+    releases = []
+    for page in range(1, 11):
+        batch = api(f"https://api.github.com/repos/{REPO}/releases?per_page=100&page={page}")
+        releases.extend(r for r in batch if not r["draft"] and not r["prerelease"]
+                        and re.fullmatch(r"v?\d+\.\d+\.\d+", r["tag_name"]))
+        if len(batch) < 100:
+            break
+    else:
+        raise RuntimeError("Too many releases to determine latest version safely")
+    if not releases:
+        raise RuntimeError("No stable semantic-version releases found")
+    release = max(releases, key=lambda r: version_tuple(r["tag_name"]))
     tag = release["tag_name"]
     last = version_tuple(tag)
     published = dt.datetime.fromisoformat(release["published_at"].replace("Z", "+00:00"))
@@ -70,7 +81,7 @@ def main():
     next_version = max(candidate, current)
     version = ".".join(map(str, next_version))
     print(f"Eligible: {len(relevant)} relevant changed files since {tag}; next version v{version}.")
-    write_output(eligible="true", version=version)
+    write_output(eligible="true", version=version, source_sha=git("rev-parse", "HEAD"))
 
 
 if __name__ == "__main__":
