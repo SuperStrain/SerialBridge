@@ -2,6 +2,12 @@
 
 SerialBridge is a Windows .NET 8 WPF application that bridges local serial ports to TCP sockets bidirectionally. The existing build and unit-test workflow remains the source of mechanical validation.
 
+## Review output language
+
+- Write all Codex Code Review summaries, findings, severity explanations, risk assessments, and suggested fixes in Simplified Chinese (简体中文).
+- Keep code identifiers, file paths, command names, API names, and literal error messages unchanged when precision requires it.
+- Apply this language requirement to both automatic pull-request reviews and reviews requested with `@codex review`.
+
 ## Code Review Rules
 
 ### Transparent serial/TCP forwarding
