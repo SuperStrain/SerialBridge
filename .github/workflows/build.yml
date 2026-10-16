@@ -161,7 +161,7 @@ jobs:
             if (!(Test-Path $file) -or (Get-Item $file).Length -eq 0) { throw "Missing or empty artifact: $file" }
           }
           $exeVersion = (Get-Item 'dist/publish/SerialBridge.exe').VersionInfo.ProductVersion
-          if (($exeVersion -split '\\+', 2)[0] -ne $version) { throw "EXE version $exeVersion differs from $version" }
+          if ($exeVersion.Split('+')[0] -ne $version) { throw "EXE version $exeVersion differs from $version" }
           Add-Type -AssemblyName System.IO.Compression
           $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $portable).Path)
           try {
