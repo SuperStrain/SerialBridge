@@ -35,6 +35,29 @@
   fitAddon.fit();
   term.focus();
 
+  // 剪贴板由桌面宿主处理，避免浏览器快捷键和网页剪贴板权限干扰。
+  term.attachCustomKeyEventHandler(event => {
+    if (event.altKey || event.metaKey) return true;
+    const key = event.key.toLowerCase();
+    const copy = event.ctrlKey && (
+      (event.shiftKey && key === 'c') || (!event.shiftKey && key === 'insert'));
+    const paste = (event.ctrlKey && key === 'v') ||
+      (!event.ctrlKey && event.shiftKey && key === 'insert');
+    if (!copy && !paste) return true; // Ctrl+C 仍向设备发送中断。
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.type === 'keydown' && !event.repeat) {
+      if (copy) {
+        const text = term.getSelection();
+        if (text) window.chrome.webview.postMessage({ type: 'copy', text });
+      } else {
+        window.chrome.webview.postMessage({ type: 'paste' });
+      }
+    }
+    return false;
+  });
+
   // 窗口/容器尺寸变化时重排终端（修复拖大窗口后画面不跟随）
   new ResizeObserver(() => {
     try { fitAddon.fit(); } catch (e) { /* 容器为 0 尺寸时忽略 */ }
@@ -56,6 +79,7 @@
 
   // 供自动化/测试使用：等价于按键输入
   window.sendText = function (text) { term.input(text); };
+  window.pasteText = function (text) { term.paste(text); term.focus(); };
 
   window.clearTerm = function () { term.clear(); };
   window.focusTerm = function () { term.focus(); };
