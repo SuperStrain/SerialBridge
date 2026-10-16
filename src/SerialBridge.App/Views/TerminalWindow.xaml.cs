@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using Microsoft.Web.WebView2.Core;
@@ -91,6 +92,9 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
             cancellationToken.ThrowIfCancellationRequested();
             await Web.EnsureCoreWebView2Async(env);
             cancellationToken.ThrowIfCancellationRequested();
+
+            // 终端接管按键，避免 Ctrl+Shift+C 打开 DevTools、Ctrl+R 刷新页面等。
+            Web.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = false;
 
             // 本地资源映射（免 HTTP 服务、离线可用）
             var terminalDir = Path.Combine(AppContext.BaseDirectory, "Assets", "terminal");
@@ -195,66 +199,39 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
 
-    private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    private async void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         try
         {
-            var json = e.WebMessageAsJson;
-            // 简单解析：{"type":"input","text":"..."} / {"type":"ready"}
-            if (json.Contains("\"ready\"", StringComparison.Ordinal)) return;
-            if (!json.Contains("\"input\"", StringComparison.Ordinal)) return;
-            var text = ExtractJsonStringField(json, "text");
-            if (text is null) return;
-            var bytes = Encoding.UTF8.GetBytes(text);
-            _runtime.WriteLocal(bytes);
-            _viewModel.NoteSent(bytes.Length);
+            if (_lifetime.IsClosing) return;
+            using var message = JsonDocument.Parse(e.WebMessageAsJson);
+            var root = message.RootElement;
+            switch (root.GetProperty("type").GetString())
+            {
+                case "copy":
+                    var selection = root.GetProperty("text").GetString();
+                    if (!string.IsNullOrEmpty(selection)) Clipboard.SetText(selection);
+                    break;
+                case "paste":
+                    if (!_ready || !Clipboard.ContainsText()) return;
+                    var clipboardText = Clipboard.GetText();
+                    // 使用 xterm 的粘贴入口，保留换行处理及 bracketed paste 模式。
+                    await Web.ExecuteScriptAsync($"window.pasteText({JsonSerializer.Serialize(clipboardText)})");
+                    break;
+                case "input":
+                    var text = root.GetProperty("text").GetString();
+                    if (text is null) return;
+                    var bytes = Encoding.UTF8.GetBytes(text);
+                    _runtime.WriteLocal(bytes);
+                    _viewModel.NoteSent(bytes.Length);
+                    break;
+            }
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine("terminal message: " + ex.Message);
+            if (!_lifetime.IsClosing) _viewModel.StateText = "终端操作失败：" + ex.Message;
         }
-    }
-
-    private static string? ExtractJsonStringField(string json, string field)
-    {
-        // 轻量提取（避免引入 JSON 库）：匹配 "field":"..."，处理常见转义
-        var key = $"\"{field}\":";
-        var idx = json.IndexOf(key, StringComparison.Ordinal);
-        if (idx < 0) return null;
-        var start = json.IndexOf('"', idx + key.Length);
-        if (start < 0) return null;
-        var sb = new System.Text.StringBuilder();
-        for (var i = start + 1; i < json.Length; i++)
-        {
-            var c = json[i];
-            if (c == '"' && json[i - 1] != '\\') break;
-            if (c == '\\' && i + 1 < json.Length)
-            {
-                var n = json[++i];
-                switch (n)
-                {
-                    case 'n': sb.Append('\n'); break;
-                    case 'r': sb.Append('\r'); break;
-                    case 't': sb.Append('\t'); break;
-                    case 'b': sb.Append('\b'); break;
-                    case 'f': sb.Append('\f'); break;
-                    case '"': sb.Append('"'); break;
-                    case '\\': sb.Append('\\'); break;
-                    case 'u':
-                        if (i + 4 < json.Length &&
-                            ushort.TryParse(json.AsSpan(i + 1, 4),
-                                System.Globalization.NumberStyles.HexNumber, null, out var code))
-                        {
-                            sb.Append((char)code);
-                            i += 4;
-                        }
-                        break;
-                    default: sb.Append(n); break;
-                }
-            }
-            else sb.Append(c);
-        }
-        return sb.ToString();
     }
 
     // 设备输出 → xterm
