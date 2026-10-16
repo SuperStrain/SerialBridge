@@ -41,7 +41,7 @@ import time
 
 # 默认 shell 提示符：覆盖 "~ # "、"$ "、"# "、"[root@host ~]# " 等常见样式。
 # 若设备提示符不匹配，用 --prompt 显式指定（正则，按行尾匹配）。
-DEFAULT_PROMPT_RE = r"(?:^|\r?\n)[^\r\n]{0,40}(?:[\$#] |~ \$ |~ # )\Z"
+DEFAULT_PROMPT_RE = r"(?:^|\r?\n)[^\r\n]{0,40}(?:[\$#] |~ \$ |~ # )(?=\r?\n|$)"
 
 LOGIN_RE = re.compile(rb"(?i)login\s*:\s*$")
 PASSWORD_RE = re.compile(rb"(?i)password\s*:\s*$")
@@ -77,6 +77,7 @@ class SerialTcpSession:
         self.default_timeout = default_timeout
         self.sock: socket.socket = None
         self._pending = bytearray()
+        self._eof = False
 
     # ---------- 连接管理 ----------
 
@@ -113,12 +114,16 @@ class SerialTcpSession:
 
     def _login(self):
         """Explicit login: do not claim readiness until a shell prompt arrives."""
-        initial = self._wait_for([LOGIN_RE, self.prompt_re], self.default_timeout)
+        try:
+            initial = self._wait_for([LOGIN_RE, self.prompt_re], min(0.5, self.default_timeout))
+        except PromptTimeoutError:
+            initial = self._send_and_wait(b"\r", [LOGIN_RE, self.prompt_re],
+                                          self.default_timeout)
         if self.prompt_re.search(initial):
             self._pending.extend(initial)
             return
         response = self._send_and_wait(
-            self.login.encode("utf-8") + b"\\r",
+            self.login.encode("utf-8") + b"\r",
             [PASSWORD_RE, self.prompt_re, LOGIN_RE], self.default_timeout)
         if LOGIN_RE.search(response):
             raise SerialTcpError("设备拒绝用户名")
@@ -126,7 +131,7 @@ class SerialTcpSession:
             return  # Passwordless login
         if self.password is None:
             raise SerialTcpError("设备需要密码，请提供 --password")
-        result = self._send_and_wait(self.password.encode("utf-8") + b"\\r",
+        result = self._send_and_wait(self.password.encode("utf-8") + b"\r",
                                      [self.prompt_re, LOGIN_RE, PASSWORD_RE],
                                      self.default_timeout)
         if not self.prompt_re.search(result):
@@ -140,6 +145,7 @@ class SerialTcpSession:
                 pass
         self.sock = None
         self._pending.clear()
+        self._eof = False
 
     # ---------- 底层收发 ----------
 
@@ -147,6 +153,8 @@ class SerialTcpSession:
         """Read for duration seconds; None means EOF. Does not consume _pending."""
         if not self.sock:
             raise SerialTcpError("会话未建立")
+        if self._eof:
+            raise SerialTcpError("串口 TCP 连接已关闭")
         buf = bytearray()
         end = time.monotonic() + max(0, duration)
         while True:
@@ -159,9 +167,8 @@ class SerialTcpSession:
                     break
                 chunk = self.sock.recv(4096)
                 if not chunk:
-                    if buf:
-                        self._pending.extend(buf)
-                    return None
+                    self._eof = True
+                    return bytes(buf) if buf else None
                 buf.extend(chunk)
             except BlockingIOError:
                 continue
@@ -189,6 +196,9 @@ class SerialTcpSession:
                 self._pending[:0] = acc
                 raise SerialTcpError("连接被对端关闭")
             acc.extend(chunk)
+            if self._eof and not any(p.search(acc) for p in patterns):
+                self._pending[:0] = acc
+                raise SerialTcpError("连接被对端关闭")
 
     def _send_and_wait(self, data: bytes, patterns, timeout: float) -> bytes:
         self.send_raw(data)
@@ -221,9 +231,9 @@ class SerialTcpSession:
         incoming = self._recv_for(duration)
         if incoming is None:
             # The data already read before EOF remains available to callers.
-            buffered += bytes(self._pending)
-            self._pending.clear()
-            return buffered
+            if buffered:
+                return buffered
+            raise SerialTcpError("串口 TCP 连接已关闭")
         return buffered + incoming
 
     # ---------- 命令执行 ----------
@@ -244,7 +254,7 @@ class SerialTcpSession:
         previous = bytes(self._pending)
         self._pending.clear()
         try:
-            self.send_raw(cmd.encode() + b"\\r")
+            self.send_raw(cmd.encode() + b"\r")
             acc = self._wait_for([pat], t)
         except (SerialTcpError, PromptTimeoutError):
             self._pending[:0] = previous
@@ -263,7 +273,14 @@ class SerialTcpSession:
                 break
         # 剥离尾部提示符行
         if lines and pat.search(lines[-1].encode(errors="replace")):
-            lines = lines[:-1]
+            last = lines[-1]
+            tail = re.sub(r"(?:~ )?[#$] $", "", last)
+            if tail == last or (tail.startswith("[") and tail.endswith("]")):
+                lines = lines[:-1]
+            elif tail:
+                lines[-1] = tail
+            else:
+                lines = lines[:-1]
         return "\n".join(lines).strip()
 
     def interrupt(self):
