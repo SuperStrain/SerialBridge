@@ -4,4 +4,6 @@ dist/
 dist/ui_*.png
 *.user
 .vs/
-\n__pycache__/\n*.pyc\n
+
+__pycache__/
+*.pyc
