@@ -1,0 +1,87 @@
+name: Codex Code Review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Never expose the API key to code originating from forks or draft PRs.
+    if: >-
+      ${{ !github.event.pull_request.draft &&
+          github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      feedback: ${{ steps.codex.outputs.final-message }}
+    steps:
+      - name: Check out PR merge commit
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Review PR changes with Codex
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":read-only"
+          prompt: |
+            Review the changes introduced by this pull request only.
+            Repository: ${{ github.repository }}
+            Base commit: ${{ github.event.pull_request.base.sha }}
+            Head commit: ${{ github.event.pull_request.head.sha }}
+
+            Inspect the diff using git diff BASE...HEAD (substitute the
+            exact commit hashes above). Review surrounding code as needed.
+            Focus on concrete correctness, security, resource lifecycle,
+            async/concurrency, serial-port and TCP behavior, and regressions
+            in this .NET 8 / WPF application.
+
+            Report only actionable defects introduced by this PR.
+            For each finding, give severity, file/line, explanation and
+            a practical fix. If there are no actionable findings, say so.
+            Do not edit files or suggest committing test-only artifacts.
+
+  publish-review:
+    needs: review
+    if: >-
+      ${{ needs.review.result == 'success' &&
+          needs.review.outputs.feedback != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create or update Codex review comment
+        uses: actions/github-script@v7
+        env:
+          CODEX_REVIEW: ${{ needs.review.outputs.feedback }}
+        with:
+          script: |
+            const marker = '<!-- serialbridge-codex-code-review -->';
+            const text = process.env.CODEX_REVIEW || '';
+            const body = marker + '\n## Codex Code Review\n\n' + text.slice(0, 60000);
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100
+            });
+            const previous = comments.find(c =>
+              c.user?.type === 'Bot' && c.body?.includes(marker));
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: previous.id, body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body
+              });
+            }
