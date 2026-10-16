@@ -126,10 +126,11 @@ class SerialTcpSession:
             return  # Passwordless login
         if self.password is None:
             raise SerialTcpError("设备需要密码，请提供 --password")
-        self._send_and_wait(self.password.encode("utf-8") + b"\\r",
-                            [self.prompt_re, LOGIN_RE, PASSWORD_RE], self.default_timeout)
-        # Confirm that the login actually finished, rather than accepting a retry prompt.
-        # _send_and_wait also preserves trailing bytes for the next read.
+        result = self._send_and_wait(self.password.encode("utf-8") + b"\\r",
+                                     [self.prompt_re, LOGIN_RE, PASSWORD_RE],
+                                     self.default_timeout)
+        if not self.prompt_re.search(result):
+            raise SerialTcpError("设备未进入 Shell，登录可能失败")
 
     def close(self):
         if self.sock:
