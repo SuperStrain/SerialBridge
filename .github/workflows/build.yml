@@ -1,95 +1,243 @@
 name: Build & Release
 
-# 触发条件：
-# - 推送 main：完整构建验证（产物仅存为 Actions artifact，不发 Release）
-# - 推送 v* 标签：完整构建 + 自动创建 GitHub Release（正式发布）
-# - PR 到 main：只跑单元测试
-# - 手动：Actions 页面 workflow_dispatch
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches: [main]
+    tags: ['v*']
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
+  schedule:
+    # Daily eligibility check; releases are at least 15 days apart.
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: windows-latest
-    permissions:
-      contents: write   # 创建 Release 需要
-
+  release-check:
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.check.outputs.eligible }}
+      version: ${{ steps.check.outputs.version }}
+      source_sha: ${{ steps.check.outputs.source_sha }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        if: github.event_name == 'schedule'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check 15-day window and source changes
+        id: check
+        if: github.event_name == 'schedule'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_eligibility.py
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+  test:
+    needs: release-check
+    if: ${{ github.event_name != 'schedule' || needs.release-check.outputs.eligible == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && needs.release-check.outputs.source_sha || github.sha }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build and run unit tests
+        run: dotnet test SerialBridge.sln -c Debug --nologo
+
+  package:
+    needs: [release-check, test]
+    if: ${{ github.event_name != 'pull_request' && needs.test.result == 'success' }}
+    runs-on: windows-latest
+    # Prevent concurrent main, tag and scheduled release packaging/publishing.
+    concurrency:
+      group: serialbridge-release-package
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'schedule' && needs.release-check.outputs.source_sha || github.sha }}
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
-      - name: Run unit tests
-        run: dotnet test SerialBridge.sln -c Debug --nologo
+      - name: Resolve and validate package version
+        id: version
+        shell: pwsh
+        env:
+          AUTO_VERSION: ${{ needs.release-check.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $projectPath = 'src/SerialBridge.App/SerialBridge.App.csproj'
+          $installerPath = 'installer/SerialBridge.iss'
+          [xml]$project = Get-Content $projectPath
+          $projectVersion = [string]($project.Project.PropertyGroup.Version | Select-Object -First 1)
+          $installerText = Get-Content $installerPath -Raw
+          $match = [regex]::Match($installerText, '(?m)^#define AppVersion "([^"]+)"\r?$')
+          if (-not $match.Success) { throw 'Inno Setup AppVersion was not found' }
+          $installerVersion = $match.Groups[1].Value
+          if ('${{ github.event_name }}' -eq 'schedule') {
+            $version = $env:AUTO_VERSION
+            if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid automatic version' }
+            foreach ($propertyName in @('Version','FileVersion','AssemblyVersion','InformationalVersion')) {
+              $nodes = $project.SelectNodes("/Project/PropertyGroup/$propertyName")
+              if ($nodes.Count -ne 1) { throw "Expected one $propertyName property" }
+              $nodes[0].InnerText = $version
+            }
+            $project.Save((Join-Path (Get-Location).Path $projectPath))
+            $installerText = $installerText.Replace("#define AppVersion `"$installerVersion`"", "#define AppVersion `"$version`"")
+            [System.IO.File]::WriteAllText((Join-Path (Get-Location).Path $installerPath), $installerText, [System.Text.UTF8Encoding]::new($false))
+          } else {
+            $version = $projectVersion
+            if ($installerVersion -ne $version) { throw "Installer $installerVersion differs from project $version" }
+          }
+          foreach ($propertyName in @('Version','FileVersion','AssemblyVersion','InformationalVersion')) {
+            $value = [string]($project.SelectSingleNode("/Project/PropertyGroup/$propertyName").InnerText)
+            if ($value -ne $version) { throw "$propertyName $value differs from $version" }
+          }
+          if ('${{ github.ref_type }}' -eq 'tag' -and '${{ github.ref_name }}' -ne "v$version") {
+            throw "Tag ${{ github.ref_name }} does not match version v$version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Publish (self-contained win-x64)
+      - name: Prepare version commit before compilation
+        if: github.event_name == 'schedule'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/SerialBridge.App/SerialBridge.App.csproj installer/SerialBridge.iss
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 1) {
+            git commit -m "chore(release): prepare v${{ steps.version.outputs.version }}"
+            if ($LASTEXITCODE -ne 0) { throw 'Version commit failed' }
+          } elseif ($LASTEXITCODE -ne 0) { throw 'Git diff failed' }
+          "RELEASE_COMMIT=$(git rev-parse HEAD)" >> $env:GITHUB_ENV
+
+      - name: Publish self-contained Windows x64 application
         run: dotnet publish src/SerialBridge.App -c Release -r win-x64 --self-contained true -o dist/publish --nologo
 
-      # .NET 8 SDK 不会把 ApplicationIcon 写入 apphost exe，需注入（见 scripts/inject_icon.py）
       - name: Inject application icon
         run: python scripts/inject_icon.py dist/publish/SerialBridge.exe src/SerialBridge.App/Assets/app.ico
 
-      # 绿色版：解压到任意目录直接运行 SerialBridge.exe，无需安装
-      - name: Build portable zip
+      - name: Build portable ZIP
         shell: pwsh
         run: |
-          [xml]$proj = Get-Content src/SerialBridge.App/SerialBridge.App.csproj
-          $version = $proj.Project.PropertyGroup.Version | Select-Object -First 1
+          $version = '${{ steps.version.outputs.version }}'
           New-Item -ItemType Directory -Force -Path dist/portable | Out-Null
           Compress-Archive -Path dist/publish/* -DestinationPath "dist/portable/SerialBridge-Portable-$version-win-x64.zip" -Force
-          Write-Host "portable zip: SerialBridge-Portable-$version-win-x64.zip"
-
-      - name: Verify tag matches project version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}".TrimStart('v')
-          [xml]$proj = Get-Content src/SerialBridge.App/SerialBridge.App.csproj
-          $projVersion = $proj.Project.PropertyGroup.Version | Select-Object -First 1
-          if ($tag -ne $projVersion) {
-            throw "标签 v$tag 与 csproj 版本 $projVersion 不一致，请先更新 <Version> 再打标签"
-          }
-          Write-Host "版本校验通过：v$tag"
 
       - name: Build installer (Inno Setup)
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $iscc = @("C:\Program Files (x86)\Inno Setup 6\ISCC.exe", "C:\Program Files\Inno Setup 6\ISCC.exe") |
                   Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $iscc) {
-            Write-Host "Inno Setup 未预装，尝试通过 Chocolatey 安装…"
             choco install innosetup -y --no-progress
-            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed: $LASTEXITCODE" }
+            $iscc = @("C:\Program Files (x86)\Inno Setup 6\ISCC.exe", "C:\Program Files\Inno Setup 6\ISCC.exe") |
+                    Where-Object { Test-Path $_ } | Select-Object -First 1
           }
+          if (-not $iscc) { throw 'Inno Setup compiler not available' }
           & $iscc installer/SerialBridge.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed: $LASTEXITCODE" }
 
-      - name: Upload build artifact
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $installer = "dist/installer/SerialBridge-Setup-$version-x64.exe"
+          $portable = "dist/portable/SerialBridge-Portable-$version-win-x64.zip"
+          foreach ($file in @($installer, $portable, 'dist/publish/SerialBridge.exe')) {
+            if (!(Test-Path $file) -or (Get-Item $file).Length -eq 0) { throw "Missing or empty artifact: $file" }
+          }
+          $exeVersion = (Get-Item 'dist/publish/SerialBridge.exe').VersionInfo.ProductVersion
+          if (($exeVersion -split '\\+', 2)[0] -ne $version) { throw "EXE version $exeVersion differs from $version" }
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $portable).Path)
+          try {
+            if (-not ($zip.Entries | Where-Object { $_.FullName -eq 'SerialBridge.exe' })) {
+              throw 'Portable ZIP is missing SerialBridge.exe'
+            }
+          } finally { $zip.Dispose() }
+
+      - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SerialBridge-${{ github.ref_name }}
+          name: SerialBridge-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             dist/installer/*.exe
             dist/portable/*.zip
           if-no-files-found: error
           retention-days: 14
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/installer/SerialBridge-Setup-*.exe
-            dist/portable/SerialBridge-Portable-*.zip
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+      - name: Commit version and publish scheduled release
+        if: github.event_name == 'schedule'
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $tag = "v$version"
+          $expected = '${{ needs.release-check.outputs.source_sha }}'
+          $remote = git ls-remote origin refs/heads/main
+          if ($LASTEXITCODE -ne 0 -or -not $remote) { throw 'Could not inspect remote main' }
+          $remoteSha = ($remote -split '\\s+')[0]
+          if ($remoteSha -ne $expected) { throw 'main changed since eligibility check; stop to avoid stale release' }
+          if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_COMMIT) { throw 'Build commit changed unexpectedly' }
+          if ((git rev-parse HEAD).Trim() -ne $expected) {
+            git push origin "HEAD:refs/heads/main"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not push version commit to main' }
+          }
+          $remoteTag = git ls-remote --tags --refs origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check remote release tag' }
+          if (-not $remoteTag) {
+            git tag -a $tag -m "Release $tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Tag creation failed' }
+            git push origin "refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Tag push failed' }
+          } else {
+            git fetch origin "refs/tags/$tag:refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Existing tag fetch failed' }
+            $tagSha = (git rev-list -n 1 $tag).Trim()
+            $headSha = (git rev-parse HEAD).Trim()
+            if ($tagSha -ne $headSha) { throw "Existing $tag points to a different commit" }
+          }
+          $installer = "dist/installer/SerialBridge-Setup-$version-x64.exe"
+          $portable = "dist/portable/SerialBridge-Portable-$version-win-x64.zip"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $installer $portable --clobber
+          } else {
+            gh release create $tag $installer $portable --verify-tag --generate-notes --title $tag
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release publication failed' }
+
+      - name: Publish manually tagged release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ github.ref_name }}'
+          $version = '${{ steps.version.outputs.version }}'
+          $installer = "dist/installer/SerialBridge-Setup-$version-x64.exe"
+          $portable = "dist/portable/SerialBridge-Portable-$version-win-x64.zip"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $installer $portable --clobber
+          } else {
+            gh release create $tag $installer $portable --verify-tag --generate-notes --title $tag
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
