@@ -39,11 +39,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\dist\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\src\SerialBridge.App\Assets\app.ico"; DestDir: "{app}"; DestName: "SerialBridge.ico"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\SerialBridge.ico"
 Name: "{group}\卸载 {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\SerialBridge.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
@@ -59,6 +60,16 @@ FinishedLabelNoIcons=安装完成。%n%n[userename] 已安装到 [name]。您的
 FinishedLabel=安装完成。%n%n[userename] 已安装到 [name]。您的映射配置保存在 %AppData%\SerialBridge，升级或卸载时自动保留。
 
 [Code]
+// Notify Explorer to invalidate cached icons after installing or updating shortcuts.
+procedure SHChangeNotify(wEventId: LongWord; uFlags: LongWord; dwItem1: LongInt; dwItem2: LongInt);
+  external 'SHChangeNotify@shell32.dll stdcall';
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SHChangeNotify($08000000, 0, 0, 0); // SHCNE_ASSOCCHANGED / SHCNF_IDLIST
+end;
+
 // 卸载时询问是否删除用户配置（%AppData%\SerialBridge）
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
