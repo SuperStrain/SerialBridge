@@ -6,10 +6,33 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: transparent; overflow: hidden; }
   #term { height: 100%; padding: 4px; box-sizing: border-box; }
+  #findBar { position: absolute; z-index: 10; top: 10px; right: 20px; display: none;
+    gap: 5px; align-items: center; padding: 7px; background: #28283c;
+    color: #dcd7cf; border: 1px solid #585b70; border-radius: 7px;
+    box-shadow: 0 4px 14px #0009; font: 12px 'Segoe UI', sans-serif; }
+  #findBar.visible { display: flex; }
+  #findText { width: 220px; border-radius: 4px; border: 1px solid #585b70;
+    padding: 5px 7px; color: #fff; background: #1e1e2e; outline: none; }
+  #findText:focus { border-color: #89b4fa; }
+  #findBar button, #jumpBottom { border: 1px solid #585b70; border-radius: 4px;
+    background: #363650; color: #dcd7cf; padding: 5px 8px; cursor: pointer; }
+  #findBar button:hover, #jumpBottom:hover { background: #4b4b68; }
+  #findCount { min-width: 52px; text-align: center; color: #bac2de; }
+  #jumpBottom { position: absolute; right: 22px; bottom: 14px; z-index: 9;
+    display: none; background: #314b79; }
+  #jumpBottom.visible { display: block; }
 </style>
 </head>
 <body>
 <div id="term"></div>
+<div id="findBar" role="search" aria-label="搜索终端历史输出">
+  <input id="findText" type="search" placeholder="查找终端文本" aria-label="查找内容" />
+  <span id="findCount" aria-live="polite">0/0</span>
+  <button type="button" id="findPrev" title="上一个 (Shift+Enter)">↑</button>
+  <button type="button" id="findNext" title="下一个 (Enter)">↓</button>
+  <button type="button" id="findClose" title="关闭搜索 (Esc)">✕</button>
+</div>
+<button type="button" id="jumpBottom" title="回到底部并恢复日志跟随">↓ 回到底部</button>
 <script src="xterm.js"></script>
 <script src="addon-fit.js"></script>
 <script>
@@ -39,6 +62,19 @@
   term.attachCustomKeyEventHandler(event => {
     if (event.altKey || event.metaKey) return true;
     const key = event.key.toLowerCase();
+    if (event.type === 'keydown' && event.ctrlKey && key === 'f') {
+      event.preventDefault();
+      event.stopPropagation();
+      openFind();
+      return false;
+    }
+    if (event.type === 'keydown' && key === 'f3') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!findBar.classList.contains('visible')) openFind();
+      else navigateFind(event.shiftKey ? -1 : 1);
+      return false;
+    }
     const copy = event.ctrlKey && (
       (event.shiftKey && key === 'c') || (!event.shiftKey && key === 'insert'));
     const paste = (event.ctrlKey && key === 'v') ||
@@ -68,20 +104,144 @@
     window.chrome.webview.postMessage({ type: 'input', text: data });
   });
 
+  // xterm.js 自身会在用户查看 scrollback 时保持 viewport。
+  // 不得在写入新日志后强制 scrollToBottom，否则滚轮上翻会被打断。
+  const jumpBottom = document.getElementById('jumpBottom');
+  const atBottom = () => term.buffer.active.viewportY >= term.buffer.active.baseY;
+  const updateScrollState = () => {
+    jumpBottom.classList.toggle('visible', !atBottom());
+  };
+  term.onScroll(updateScrollState);
+  jumpBottom.addEventListener('click', () => {
+    term.scrollToBottom();
+    term.focus();
+    updateScrollState();
+  });
+
+  // 搜索只查看 xterm 当前保留的 scrollback，不向物理串口发送字符。
+  // 只用终端自带 buffer 和 select API，避免额外网络依赖。
+  const findBar = document.getElementById('findBar');
+  const findText = document.getElementById('findText');
+  const findCount = document.getElementById('findCount');
+  let matches = [];
+  let selectedMatch = -1;
+
+  function openFind() {
+    findBar.classList.add('visible');
+    const selected = term.getSelection();
+    if (selected && !selected.includes('\n') && selected.length <= 200) {
+      findText.value = selected;
+    }
+    findText.focus();
+    findText.select();
+    refreshFind();
+  }
+
+  function closeFind() {
+    findBar.classList.remove('visible');
+    matches = [];
+    selectedMatch = -1;
+    term.clearSelection();
+    term.focus();
+  }
+
+  function refreshFind() {
+    matches = [];
+    selectedMatch = -1;
+    const needle = findText.value.toLowerCase();
+    if (needle) {
+      const buffer = term.buffer.active;
+      for (let row = 0; row < buffer.length; row++) {
+        const line = buffer.getLine(row);
+        if (!line) continue;
+        // Translate characters to terminal cells for CJK/full-width selection.
+        let text = '';
+        const columns = [];
+        for (let column = 0; column < line.length; column++) {
+          const cell = line.getCell(column);
+          if (!cell || cell.getWidth() === 0) continue;
+          const chars = cell.getChars() || ' ';
+          text += chars;
+          for (let i = 0; i < chars.length; i++) columns.push(column);
+        }
+        const searchable = text.toLowerCase();
+        let start = 0;
+        let index;
+        while ((index = searchable.indexOf(needle, start)) !== -1) {
+          const first = columns[index];
+          const lastIndex = index + needle.length - 1;
+          const last = columns[lastIndex];
+          if (first !== undefined && last !== undefined) {
+            const endCell = line.getCell(last);
+            matches.push({ row, column: first,
+              width: last - first + Math.max(1, endCell.getWidth()) });
+          }
+          start = index + Math.max(needle.length, 1);
+        }
+      }
+    }
+    if (matches.length) navigateFind(1);
+    else {
+      term.clearSelection();
+      findCount.textContent = '0/0';
+    }
+  }
+
+  function navigateFind(direction) {
+    if (!matches.length) {
+      findCount.textContent = '0/0';
+      return;
+    }
+    selectedMatch = (selectedMatch + direction + matches.length) % matches.length;
+    const found = matches[selectedMatch];
+    term.select(found.column, found.row, found.width);
+    findCount.textContent = (selectedMatch + 1) + '/' + matches.length;
+  }
+
+  findText.addEventListener('input', refreshFind);
+  findText.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      navigateFind(e.shiftKey ? -1 : 1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeFind();
+    }
+  });
+  findBar.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+  });
+  document.getElementById('findPrev').addEventListener('click', () => navigateFind(-1));
+  document.getElementById('findNext').addEventListener('click', () => navigateFind(1));
+  document.getElementById('findClose').addEventListener('click', closeFind);
+  // Handle shortcuts even when focus has moved off the xterm canvas.
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      openFind();
+    } else if (e.key === 'F3' && findBar.classList.contains('visible')) {
+      e.preventDefault();
+      navigateFind(e.shiftKey ? -1 : 1);
+    }
+  });
+
   // 设备输出（base64 承载原始字节）
   window.writeB64 = function (b64) {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    term.write(bytes);
-    term.scrollToBottom();
+    term.write(bytes, updateScrollState);
   };
 
   // 供自动化/测试使用：等价于按键输入
   window.sendText = function (text) { term.input(text); };
   window.pasteText = function (text) { term.paste(text); term.focus(); };
 
-  window.clearTerm = function () { term.clear(); };
+  window.clearTerm = function () {
+    term.clear();
+    if (findBar.classList.contains('visible')) refreshFind();
+    updateScrollState();
+  };
   window.focusTerm = function () { term.focus(); };
 
   window.chrome.webview.postMessage({ type: 'ready' });
