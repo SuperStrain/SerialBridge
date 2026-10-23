@@ -167,6 +167,12 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     // JS 按键 → 串口
+    private void OnFindText(object sender, RoutedEventArgs e)
+    {
+        if (_ready && !_lifetime.IsClosing)
+            _ = Web.ExecuteScriptAsync("window.openTerminalFind()");
+    }
+
     private void OnClearScreen(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_ready) _ = Web.ExecuteScriptAsync("window.clearTerm()");
