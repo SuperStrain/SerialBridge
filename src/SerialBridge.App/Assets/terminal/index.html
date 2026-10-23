@@ -68,7 +68,7 @@
       openFind();
       return false;
     }
-    if (event.type === 'keydown' && key === 'f3') {
+    if (event.type === 'keydown' && key === 'f3' && !event.ctrlKey && !event.shiftKey || key === 'f3' && event.shiftKey && !event.ctrlKey) {
       event.preventDefault();
       event.stopPropagation();
       if (!findBar.classList.contains('visible')) openFind();
@@ -143,44 +143,64 @@
     findBar.classList.remove('visible');
     matches = [];
     selectedMatch = -1;
+    findDirty = true;
     term.clearSelection();
     term.focus();
   }
 
+  let findDirty = true;
   function refreshFind() {
     matches = [];
     selectedMatch = -1;
-    const needle = findText.value.toLowerCase();
+    findDirty = false;
+    const needle = findText.value.toLocaleLowerCase();
     if (needle) {
       const buffer = term.buffer.active;
-      for (let row = 0; row < buffer.length; row++) {
-        const line = buffer.getLine(row);
-        if (!line) continue;
-        // Translate characters to terminal cells for CJK/full-width selection.
-        let text = '';
-        const columns = [];
-        for (let column = 0; column < line.length; column++) {
-          const cell = line.getCell(column);
-          if (!cell || cell.getWidth() === 0) continue;
-          const chars = cell.getChars() || ' ';
-          text += chars;
-          for (let i = 0; i < chars.length; i++) columns.push(column);
-        }
-        const searchable = text.toLowerCase();
+      // Collect real characters, not xterm's empty padding cells. Wrapped
+      // buffer rows belong to one logical line and can share a match.
+      let text = '';
+      let positions = [];
+      function scan() {
+        const lower = text.toLocaleLowerCase();
         let start = 0;
         let index;
-        while ((index = searchable.indexOf(needle, start)) !== -1) {
-          const first = columns[index];
-          const lastIndex = index + needle.length - 1;
-          const last = columns[lastIndex];
-          if (first !== undefined && last !== undefined) {
-            const endCell = line.getCell(last);
-            matches.push({ row, column: first,
-              width: last - first + Math.max(1, endCell.getWidth()) });
+        while ((index = lower.indexOf(needle, start)) !== -1) {
+          const first = positions[index];
+          const last = positions[index + needle.length - 1];
+          if (first && last) {
+            matches.push({
+              row: first.row, column: first.column,
+              // xterm selection width includes cells on intervening rows.
+              width: (last.row - first.row) * term.cols +
+                last.column - first.column + last.width
+            });
           }
           start = index + Math.max(needle.length, 1);
         }
       }
+      for (let row = 0; row < buffer.length; row++) {
+        const line = buffer.getLine(row);
+        if (!line) continue;
+        if (!line.isWrapped && positions.length) {
+          scan();
+          text = '';
+          positions = [];
+        }
+        // translateToString(true) trims padding but preserves actual spaces.
+        const visible = line.translateToString(true);
+        let consumed = 0;
+        for (let col = 0; col < line.length && consumed < visible.length; col++) {
+          const cell = line.getCell(col);
+          if (!cell || cell.getWidth() === 0) continue;
+          const chars = cell.getChars();
+          if (!chars) continue;
+          text += chars;
+          for (let k = 0; k < chars.length; k++)
+            positions.push({ row, column: col, width: cell.getWidth() });
+          consumed += chars.length;
+        }
+      }
+      if (positions.length) scan();
     }
     if (matches.length) navigateFind(1);
     else {
@@ -190,12 +210,17 @@
   }
 
   function navigateFind(direction) {
+    if (findDirty) {
+      refreshFind();
+      return;
+    }
     if (!matches.length) {
       findCount.textContent = '0/0';
       return;
     }
     selectedMatch = (selectedMatch + direction + matches.length) % matches.length;
     const found = matches[selectedMatch];
+    term.scrollToLine(found.row);
     term.select(found.column, found.row, found.width);
     findCount.textContent = (selectedMatch + 1) + '/' + matches.length;
   }
@@ -232,7 +257,15 @@
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    term.write(bytes, updateScrollState);
+    term.write(bytes, () => {
+      if (findBar.classList.contains('visible')) {
+        // Rebuild lazily on navigation; avoid rescanning thousands of rows
+        // for every incoming UART packet.
+        findDirty = true;
+        findCount.textContent = '…';
+      }
+      updateScrollState();
+    });
   };
 
   // 供自动化/测试使用：等价于按键输入
