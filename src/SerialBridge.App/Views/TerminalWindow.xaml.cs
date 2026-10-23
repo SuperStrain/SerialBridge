@@ -170,7 +170,10 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     private void OnFindText(object sender, RoutedEventArgs e)
     {
         if (_ready && !_lifetime.IsClosing)
+        {
+            Web.Focus();
             _ = Web.ExecuteScriptAsync("window.openTerminalFind()");
+        }
     }
 
     private void OnClearScreen(object sender, System.Windows.RoutedEventArgs e)
