@@ -101,6 +101,8 @@
                         <Run Text="↑ " /><Run Text="{Binding TxText, Mode=OneWay}" />
                         <Run Text="  ↓ " /><Run Text="{Binding RxText, Mode=OneWay}" />
                     </TextBlock>
+                    <ui:Button Content="搜索" Click="OnFindText" Margin="0,0,8,0"
+                               ToolTip="搜索终端历史输出（Ctrl+F）" />
                     <ui:Button Content="清屏" Click="OnClearScreen"
                                ToolTip="清除终端显示（不影响设备）" />
                 </StackPanel>
@@ -125,7 +127,7 @@
 
         <Border Grid.Row="3" Background="#181825" Padding="14,6">
             <TextBlock FontSize="11.5" Foreground="#9399B2"
-                       Text="逐键透传模式：所有按键（含 Tab/Ctrl+C/方向键）直接发送到设备，回显由设备决定——与 Xshell 串口一致。复制：选中文字后 Ctrl+Shift+C；粘贴：Ctrl+Shift+V" />
+                       Text="逐键透传模式：所有按键（含 Tab/Ctrl+C/方向键）直接发送到设备，回显由设备决定——与 Xshell 串口一致。查找：Ctrl+F / F3；上翻暂停自动跟随，点击“回到底部”恢复；复制：Ctrl+Shift+C；粘贴：Ctrl+Shift+V" />
         </Border>
     </Grid>
 </ui:FluentWindow>
