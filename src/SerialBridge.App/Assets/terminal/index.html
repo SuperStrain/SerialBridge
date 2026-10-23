@@ -62,6 +62,12 @@
   term.attachCustomKeyEventHandler(event => {
     if (event.altKey || event.metaKey) return true;
     const key = event.key.toLowerCase();
+    if (key === 'escape' && findBar.classList.contains('visible')) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.type === 'keydown') closeFind();
+      return false; // Esc closes find rather than sending 0x1b to UART.
+    }
     if (event.type === 'keydown' && event.ctrlKey && key === 'f') {
       event.preventDefault();
       event.stopPropagation();
@@ -98,6 +104,10 @@
   new ResizeObserver(() => {
     try { fitAddon.fit(); } catch (e) { /* 容器为 0 尺寸时忽略 */ }
   }).observe(document.getElementById('term'));
+  term.onResize(() => {
+    findDirty = true; // Reflow changes wrapped-row coordinates.
+    if (findBar.classList.contains('visible')) findCount.textContent = '…';
+  });
 
   // 用户按键（含 Ctrl+C=0x03、方向键 ESC 序列、Tab、Enter=\r）透传给 C#
   term.onData(data => {
@@ -158,19 +168,27 @@
       const buffer = term.buffer.active;
       // Collect real characters, not xterm's empty padding cells. Wrapped
       // buffer rows belong to one logical line and can share a match.
-      let text = '';
+      let folded = '';
       let positions = [];
+      // Every UTF-16 code unit produced by Unicode case folding gets a
+      // corresponding original terminal-cell coordinate (e.g. İ -> i + dot).
+      function append(chars, row, column, width) {
+        for (const codepoint of chars) {
+          const lower = codepoint.toLocaleLowerCase();
+          folded += lower;
+          for (let k = 0; k < lower.length; k++)
+            positions.push({ row, column, width });
+        }
+      }
       function scan() {
-        const lower = text.toLocaleLowerCase();
         let start = 0;
         let index;
-        while ((index = lower.indexOf(needle, start)) !== -1) {
+        while ((index = folded.indexOf(needle, start)) !== -1) {
           const first = positions[index];
           const last = positions[index + needle.length - 1];
           if (first && last) {
             matches.push({
               row: first.row, column: first.column,
-              // xterm selection width includes cells on intervening rows.
               width: (last.row - first.row) * term.cols +
                 last.column - first.column + last.width
             });
@@ -183,21 +201,21 @@
         if (!line) continue;
         if (!line.isWrapped && positions.length) {
           scan();
-          text = '';
+          folded = '';
           positions = [];
         }
-        // translateToString(true) trims padding but preserves actual spaces.
+        // Trim *only trailing* padding; blank cells within the visible
+        // range represent real on-screen spaces (tabs/cursor movement).
         const visible = line.translateToString(true);
         let consumed = 0;
         for (let col = 0; col < line.length && consumed < visible.length; col++) {
           const cell = line.getCell(col);
           if (!cell || cell.getWidth() === 0) continue;
-          const chars = cell.getChars();
-          if (!chars) continue;
-          text += chars;
-          for (let k = 0; k < chars.length; k++)
-            positions.push({ row, column: col, width: cell.getWidth() });
-          consumed += chars.length;
+          const chars = cell.getChars() || ' ';
+          // One-cell blanks still consume a character in translated text.
+          const segment = chars.slice(0, visible.length - consumed);
+          append(segment, row, col, cell.getWidth());
+          consumed += segment.length;
         }
       }
       if (positions.length) scan();
