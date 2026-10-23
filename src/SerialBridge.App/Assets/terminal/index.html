@@ -68,7 +68,7 @@
       openFind();
       return false;
     }
-    if (event.type === 'keydown' && key === 'f3' && !event.ctrlKey && !event.shiftKey || key === 'f3' && event.shiftKey && !event.ctrlKey) {
+    if (event.type === 'keydown' && key === 'f3' && !event.ctrlKey) {
       event.preventDefault();
       event.stopPropagation();
       if (!findBar.classList.contains('visible')) openFind();
@@ -246,7 +246,7 @@
     if (e.ctrlKey && e.key.toLowerCase() === 'f') {
       e.preventDefault();
       openFind();
-    } else if (e.key === 'F3' && findBar.classList.contains('visible')) {
+    } else if (e.key === 'F3' && !e.ctrlKey && !e.altKey && !e.metaKey && findBar.classList.contains('visible')) {
       e.preventDefault();
       navigateFind(e.shiftKey ? -1 : 1);
     }
