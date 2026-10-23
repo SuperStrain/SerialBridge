@@ -1,5 +1,7 @@
 # SerialBridge 串口网络桥接工具
 
+**简体中文** | [English](README.en.md)
+
 Windows 桌面软件：把本机物理串口（COM 口，含 USB 转串口）桥接到 TCP 监听端口，实现**双向透明数据转发**。局域网设备连接 `主机IP:端口` 即可与串口设备通信，无需驱动、无需互联网。
 
 ![技术栈](https://img.shields.io/badge/.NET-8.0_LTS-blue) ![UI](https://img.shields.io/badge/WPF-Fluent_Design-2563EB) ![测试](https://img.shields.io/badge/unit_tests-14%2F14-brightgreen) ![协议](https://img.shields.io/badge/license-MIT-green)
