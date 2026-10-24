@@ -183,9 +183,10 @@
         <!-- 页头 -->
         <Grid Grid.Row="1" Margin="32,16,32,8">
             <StackPanel Orientation="Horizontal">
-                <Border Width="42" Height="42" CornerRadius="10" Background="#2563EB">
-                    <ui:SymbolIcon Symbol="ArrowSwap24" FontSize="22" Foreground="White" />
-                </Border>
+                <Image Width="42" Height="42"
+                       Source="pack://application:,,,/Assets/app.ico"
+                       Stretch="Uniform"
+                       ToolTip="SerialBridge" />
                 <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
                     <TextBlock Text="SerialBridge" FontSize="22" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
