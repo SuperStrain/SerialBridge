@@ -24,11 +24,12 @@ SerialBridge is a Windows desktop application that bridges local physical serial
 
 ## Build
 
-Build on Windows with the .NET 8 SDK and Inno Setup 6:
+Build on Windows with the .NET 8 SDK, Python 3, and Inno Setup 6.5+:
 
 ```powershell
 dotnet test tests/SerialBridge.Core.Tests
 dotnet publish src/SerialBridge.App -c Release -r win-x64 --self-contained true -o dist/publish
+python scripts/inject_icon.py dist/publish/SerialBridge.exe src/SerialBridge.App/Assets/app.ico
 ISCC.exe installer/SerialBridge.iss
 ```
 
@@ -59,7 +60,7 @@ SerialBridge.Core
 - **Serial/network:** `System.IO.Ports`, `TcpListener` / `Socket` (asynchronous I/O)
 - **Desktop UI:** WPF, WPF-UI 4.3 (Fluent Design), CommunityToolkit.Mvvm
 - **Testing:** xUnit with simulated in-memory serial devices
-- **Packaging:** Inno Setup 6; self-contained Windows deployment
+- **Packaging:** Inno Setup 6.5+; self-contained Windows deployment
 
 ## License
 
