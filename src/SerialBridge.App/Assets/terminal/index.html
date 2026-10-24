@@ -46,6 +46,7 @@
     cursorBlink: true,
     convertEol: false,        // 不转换换行：设备自己控制 \r\n
     scrollback: 5000,
+    allowProposedApi: true,   // registerDecoration 用于搜索命中项高亮
     theme: {
       background: '#1E1E2E',
       foreground: '#DCD7CF',
@@ -136,6 +137,63 @@
   let matches = [];
   let selectedMatch = -1;
 
+  // 命中项高亮：所有匹配铺半透明蓝，当前匹配叠加更强底色（配合既有选区）。
+  // 装饰挂在 marker 上，随滚动移动、随 scrollback 驱逐自动销毁；
+  // 本 xterm 构建的 DOM 渲染器不绘制装饰背景，故经 onRender 自行上色。
+  const HIGHLIGHT_ALL = '#89B4FA2E';     // ~18% 蓝
+  const HIGHLIGHT_CURRENT = '#89B4FA59'; // ~35% 蓝
+  const MAX_HIGHLIGHTS = 500;            // 防止海量命中拖垮 DOM（计数/导航不受限）
+  let matchDecorations = [];             // matchDecorations[i] = 该命中的 Decoration[]（跨折行多段）
+  let matchMarkers = [];                 // 全部 marker，统一销毁
+  function clearFindDecorations() {
+    for (const list of matchDecorations)
+      for (const d of list) { try { d.dispose(); } catch (e) { /* 已随行驱逐 */ } }
+    for (const m of matchMarkers) { try { m.dispose(); } catch (e) { /* 同上 */ } }
+    matchDecorations = [];
+    matchMarkers = [];
+  }
+  function styleMatch(index, current) {
+    const list = matchDecorations[index];
+    if (!list) return;
+    const color = current ? HIGHLIGHT_CURRENT : HIGHLIGHT_ALL;
+    for (const d of list) {
+      d.__hl = color;                       // onRender 回调读取，元素未渲染时也能生效
+      if (d.element) d.element.style.backgroundColor = color;
+    }
+  }
+  function renderFindDecorations() {
+    clearFindDecorations();
+    const buffer = term.buffer.active;
+    const cursorAbs = buffer.baseY + buffer.cursorY;
+    const count = Math.min(matches.length, MAX_HIGHLIGHTS);
+    for (let i = 0; i < count; i++) {
+      const m = matches[i];
+      const parts = [];
+      const color = i === selectedMatch ? HIGHLIGHT_CURRENT : HIGHLIGHT_ALL;
+      // 跨折行命中按缓冲行拆段（与 refreshFind 的 width 计算一致：中间行恰为 term.cols 宽）
+      let row = m.row, col = m.column, remaining = m.width;
+      while (remaining > 0 && row >= 0 && row < buffer.length && col < term.cols) {
+        const seg = Math.min(remaining, term.cols - col);
+        if (seg <= 0) break;
+        let marker;
+        try { marker = term.registerMarker(row - cursorAbs); } catch (e) { marker = undefined; }
+        if (marker) {
+          const d = term.registerDecoration({ marker, x: col, width: seg, height: 1 });
+          if (d) {
+            d.__hl = color;
+            d.onRender(el => { el.style.backgroundColor = d.__hl; });
+            parts.push(d);
+            matchMarkers.push(marker);
+          } else marker.dispose();
+        }
+        remaining -= seg;
+        row++;
+        col = 0;
+      }
+      matchDecorations.push(parts);
+    }
+  }
+
   function openFind() {
     findBar.classList.add('visible');
     const selected = term.getSelection();
@@ -154,6 +212,7 @@
     matches = [];
     selectedMatch = -1;
     findDirty = true;
+    clearFindDecorations();
     term.clearSelection();
     term.focus();
   }
@@ -220,6 +279,7 @@
       }
       if (positions.length) scan();
     }
+    renderFindDecorations();
     if (matches.length && selectFirst) navigateFind(1);
     else if (!matches.length) {
       term.clearSelection();
@@ -241,11 +301,14 @@
       findCount.textContent = '0/0';
       return;
     }
+    const previous = selectedMatch;
     selectedMatch = (selectedMatch + direction + matches.length) % matches.length;
     const found = matches[selectedMatch];
     term.scrollToLine(found.row);
     term.select(found.column, found.row, found.width);
     findCount.textContent = (selectedMatch + 1) + '/' + matches.length;
+    if (previous !== selectedMatch) styleMatch(previous, false);
+    styleMatch(selectedMatch, true);
   }
 
   findText.addEventListener('input', () => refreshFind());
