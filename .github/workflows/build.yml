@@ -8,7 +8,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    # Daily eligibility check; releases are at least 15 days apart.
+    # Daily eligibility check; releases are at least 4 days apart.
     - cron: '17 3 * * *'
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check 15-day window and source changes
+      - name: Check 4-day window and source changes
         id: check
         if: github.event_name == 'schedule'
         env:
