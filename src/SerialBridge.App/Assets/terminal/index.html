@@ -159,7 +159,7 @@
   }
 
   let findDirty = true;
-  function refreshFind() {
+  function refreshFind(selectFirst = true) {
     matches = [];
     selectedMatch = -1;
     findDirty = false;
@@ -220,8 +220,8 @@
       }
       if (positions.length) scan();
     }
-    if (matches.length) navigateFind(1);
-    else {
+    if (matches.length && selectFirst) navigateFind(1);
+    else if (!matches.length) {
       term.clearSelection();
       findCount.textContent = '0/0';
     }
@@ -229,8 +229,13 @@
 
   function navigateFind(direction) {
     if (findDirty) {
-      refreshFind();
-      return;
+      // UART output or terminal reflow invalidated cached buffer coordinates.
+      // Rebuild without jumping back to the first hit; preserve navigation
+      // position and apply the original F3 / Shift+F3 direction afterward.
+      const previousIndex = selectedMatch;
+      refreshFind(false);
+      selectedMatch = previousIndex < 0 ? -1 :
+        Math.min(previousIndex, matches.length - 1);
     }
     if (!matches.length) {
       findCount.textContent = '0/0';
@@ -243,7 +248,7 @@
     findCount.textContent = (selectedMatch + 1) + '/' + matches.length;
   }
 
-  findText.addEventListener('input', refreshFind);
+  findText.addEventListener('input', () => refreshFind());
   findText.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       e.preventDefault();
