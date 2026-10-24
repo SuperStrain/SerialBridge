@@ -61,8 +61,8 @@ def main():
     last = version_tuple(tag)
     published = dt.datetime.fromisoformat(release["published_at"].replace("Z", "+00:00"))
     age = NOW - published
-    if age < dt.timedelta(days=15):
-        print(f"Skip: {tag} released {age.days} days ago (<15 days).")
+    if age < dt.timedelta(days=4):
+        print(f"Skip: {tag} released {age.days} days ago (<4 days).")
         return
 
     git("rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}")
