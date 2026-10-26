@@ -7,6 +7,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_mode:
+        description: 'Build only, or retry eligible automatic release (main only)'
+        type: choice
+        required: true
+        default: build_only
+        options:
+          - build_only
+          - retry_auto_release
   schedule:
     # Daily eligibility check; releases are at least 4 days apart.
     - cron: '17 3 * * *'
@@ -22,26 +31,31 @@ jobs:
       version: ${{ steps.check.outputs.version }}
       source_sha: ${{ steps.check.outputs.source_sha }}
     steps:
+      - name: Require main for manual release retry
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_mode == 'retry_auto_release' && github.ref != 'refs/heads/main' }}
+        run: |
+          echo 'Manual release retry must be launched from main.' >&2
+          exit 1
       - uses: actions/checkout@v4
-        if: github.event_name == 'schedule'
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode == 'retry_auto_release') }}
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Check 4-day window and source changes
         id: check
-        if: github.event_name == 'schedule'
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode == 'retry_auto_release') }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/release_eligibility.py
 
   test:
     needs: release-check
-    if: ${{ github.event_name != 'schedule' || needs.release-check.outputs.eligible == 'true' }}
+    if: ${{ !(github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode == 'retry_auto_release')) || needs.release-check.outputs.eligible == 'true' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'schedule' && needs.release-check.outputs.source_sha || github.sha }}
+          ref: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode == 'retry_auto_release')) && needs.release-check.outputs.source_sha || github.sha }}
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
@@ -63,7 +77,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'schedule' && needs.release-check.outputs.source_sha || github.sha }}
+          ref: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode == 'retry_auto_release')) && needs.release-check.outputs.source_sha || github.sha }}
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
@@ -83,7 +97,7 @@ jobs:
           $match = [regex]::Match($installerText, '(?m)^#define AppVersion "([^"]+)"\r?$')
           if (-not $match.Success) { throw 'Inno Setup AppVersion was not found' }
           $installerVersion = $match.Groups[1].Value
-          if ('${{ github.event_name }}' -eq 'schedule') {
+          if ('${{ github.event_name }}' -eq 'schedule' -or ('${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ inputs.release_mode }}' -eq 'retry_auto_release')) {
             $version = $env:AUTO_VERSION
             if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid automatic version' }
             foreach ($propertyName in @('Version','FileVersion','AssemblyVersion','InformationalVersion')) {
@@ -108,7 +122,7 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Prepare version commit before compilation
-        if: github.event_name == 'schedule'
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode == 'retry_auto_release') }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -181,7 +195,7 @@ jobs:
           retention-days: 14
 
       - name: Commit version and publish scheduled release
-        if: github.event_name == 'schedule'
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode == 'retry_auto_release') }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
