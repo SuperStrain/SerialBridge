@@ -36,7 +36,9 @@ public partial class MonitorViewModel : ObservableObject
     private const int MaxLines = 3000;          // UI 缓存上限
     private const int MaxCaptureBytes = 8192;   // 单条记录捕获的字节上限（超出截断保存）
     private const int MaxDisplayBytes = 512;    // HEX/ASCII 显示的最大字节数
-    private const int FlushIntervalMs = 150;    // 批量刷新周期
+    private const int FlushIntervalMs = 150;
+    private const int MaxPendingEntries = 3000;
+    private const int MaxPendingBytes = 8 * 1024 * 1024;    // 批量刷新周期
 
     private readonly MappingRuntime _runtime;
     private readonly DispatcherTimer _flushTimer;
@@ -58,6 +60,7 @@ public partial class MonitorViewModel : ObservableObject
     [ObservableProperty] private string _rxText = "0 B";
     [ObservableProperty] private string _txText = "0 B";
     [ObservableProperty] private int _lineCount;
+    [ObservableProperty] private long _omittedEntries;
     [ObservableProperty] private string _serialStateText = "";
 
     public ObservableCollection<MonitorLine> Lines { get; } = new();
@@ -81,7 +84,9 @@ public partial class MonitorViewModel : ObservableObject
     private void OnDataTransferred(MonitorEntry entry)
     {
         // 暂停显示时不丢统计，仅跳过记录
-        _pending.Enqueue(new PendingItem(DateTime.UtcNow, entry.Direction, (byte[])entry.Data.Clone()));
+        if (Paused) return;
+        var data = entry.Data.Length > MaxDisplayBytes ? entry.Data[..MaxDisplayBytes] : entry.Data;
+        _pending.Enqueue(new PendingItem(entry.TimeUtc, entry.Direction, (byte[])data.Clone()));
     }
 
     private void OnStatusChanged(MappingRuntime _)
@@ -106,16 +111,12 @@ public partial class MonitorViewModel : ObservableObject
 
     private void FlushPending()
     {
-        var items = _pending.Drain();
+        OmittedEntries = _pending.Dropped;
+        if (Paused) { _pending.Clear(); return; }
+        var items = _pending.Drain(400);
         if (items.Count == 0) return;
 
-        var toAdd = new List<MonitorLine>(items.Count);
-        foreach (var item in items)
-            toAdd.Add(BuildLine(item));
-
-        if (Paused) return; // 暂停时直接丢弃（统计仍正常累计）
-
-        foreach (var line in toAdd) Lines.Add(line);
+        foreach (var item in items) Lines.Add(BuildLine(item));
         if (Lines.Count > MaxLines)
             for (var i = 0; i < Lines.Count - MaxLines; i++)
                 Lines.RemoveAt(0);
@@ -167,7 +168,11 @@ public partial class MonitorViewModel : ObservableObject
     // ---------- 命令 ----------
 
     [RelayCommand]
-    private void TogglePause() => Paused = !Paused;
+    private void TogglePause()
+    {
+        Paused = !Paused;
+        if (Paused) _pending.Clear();
+    }
 
     [RelayCommand]
     private void Clear()
@@ -196,7 +201,8 @@ public partial class MonitorViewModel : ObservableObject
         {
             var sb = new StringBuilder();
             sb.AppendLine($"# SerialBridge 通信日志 — 映射「{_runtime.Config.Name}」");
-            sb.AppendLine($"# 导出时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}  共 {Lines.Count} 条记录");
+            sb.AppendLine($"# 导出当前视图（非完整串口捕获）：{DateTime.Now:yyyy-MM-dd HH:mm:ss}  共 {Lines.Count} 条记录");
+            sb.AppendLine($"# 每条记录最多显示 {MaxDisplayBytes} 字节；累计省略 {OmittedEntries} 条监控记录。");
             sb.AppendLine("# 方向：OUT = 串口→网络（设备上传），IN = 网络→串口（客户端下发）");
             foreach (var line in Lines)
             {
@@ -226,15 +232,48 @@ public partial class MonitorViewModel : ObservableObject
     private sealed class ConcurrentQueueProducer
     {
         private readonly System.Collections.Concurrent.ConcurrentQueue<PendingItem> _queue = new();
+        private readonly object _sync = new();
+        private long _pendingBytes;
+        private long _dropped;
 
-        public void Enqueue(PendingItem item) => _queue.Enqueue(item);
+        public long Dropped => Interlocked.Read(ref _dropped);
 
-        public List<PendingItem> Drain()
+        public void Enqueue(PendingItem item)
         {
-            var list = new List<PendingItem>(_queue.Count);
-            while (_queue.TryDequeue(out var item))
-                list.Add(item);
+            lock (_sync)
+            {
+                while (_queue.Count >= MaxPendingEntries ||
+                       (_pendingBytes + item.Data.Length > MaxPendingBytes && !_queue.IsEmpty))
+                {
+                    if (!_queue.TryDequeue(out var removed)) break;
+                    _pendingBytes -= removed.Data.Length;
+                    Interlocked.Increment(ref _dropped);
+                }
+                _queue.Enqueue(item);
+                _pendingBytes += item.Data.Length;
+            }
+        }
+
+        public List<PendingItem> Drain(int maximum)
+        {
+            var list = new List<PendingItem>(maximum);
+            lock (_sync)
+            {
+                while (list.Count < maximum && _queue.TryDequeue(out var item))
+                {
+                    _pendingBytes -= item.Data.Length;
+                    list.Add(item);
+                }
+            }
             return list;
+        }
+
+        public void Clear()
+        {
+            lock (_sync)
+            {
+                while (_queue.TryDequeue(out var item)) _pendingBytes -= item.Data.Length;
+            }
         }
     }
 
