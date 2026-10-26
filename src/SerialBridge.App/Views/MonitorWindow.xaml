@@ -49,7 +49,7 @@
                                Appearance="{Binding Paused, Converter={StaticResource PauseAppearance}}" />
                     <ui:Button Margin="8,0,0,0" MinWidth="72" Content="清空"
                                Command="{Binding ClearCommand}" />
-                    <ui:Button Margin="8,0,0,0" MinWidth="72" Content="导出"
+                    <ui:Button Margin="8,0,0,0" MinWidth="72" Content="导出当前视图"
                                Command="{Binding ExportCommand}" />
                 </StackPanel>
 
@@ -72,6 +72,7 @@
                 BorderThickness="1" CornerRadius="8"
                 ClipToBounds="True">
             <ListBox x:Name="LinesList"
+                     ScrollViewer.ScrollChanged="OnLinesScrollChanged"
                      ItemsSource="{Binding Lines}"
                      FontFamily="Consolas"
                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
@@ -128,7 +129,7 @@
                     </TextBlock>
                     <TextBlock FontSize="12.5" Margin="18,0,0,0"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" VerticalAlignment="Center">
-                        <Run Text="{Binding LineCount, Mode=OneWay}" /><Run Text=" 条记录（最多缓存 3000 条）" />
+                        <Run Text="{Binding LineCount, Mode=OneWay}" /><Run Text=" 条（最多 3000），省略 " /><Run Text="{Binding OmittedEntries, Mode=OneWay}" /><Run Text=" 条" />
                     </TextBlock>
                 </StackPanel>
             </Grid>

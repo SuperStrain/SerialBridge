@@ -232,4 +232,70 @@ public sealed class SerialCaptureTests : IDisposable
         await rt.StopAsync();
         Assert.Null(rt.Capture);
     }
+    [Fact]
+    public void QueueFull_ReportsDroppedBlocksAndBytes()
+    {
+        var opt = Options();
+        opt = new SerialCaptureOptions
+        {
+            Directory = opt.Directory, MappingName = opt.MappingName,
+            Clock = opt.Clock, QueueCapacity = 1, MinFreeDiskBytes = 0
+        };
+        using var svc = new SerialCaptureService(opt);
+        // No writer started: deterministic queue overflow.
+        svc.Enqueue(DataDirection.SerialToNet, new byte[] { 1 });
+        svc.Enqueue(DataDirection.SerialToNet, new byte[] { 2, 3 });
+        Assert.Equal(1, svc.DroppedBlocks);
+        Assert.Equal(2, svc.DroppedBytes);
+    }
+
+    [Fact]
+    public async Task Stop_DrainsAcceptedEntries()
+    {
+        using (var svc = new SerialCaptureService(Options()))
+        {
+            svc.Start();
+            for (int i = 0; i < 100; i++)
+                svc.Enqueue(DataDirection.SerialToNet, Encoding.ASCII.GetBytes($"line-{i:D3}\\n"));
+        }
+        var body = File.ReadAllText(WaitForFile(_dir));
+        Assert.Contains("line-000", body);
+        Assert.Contains("line-099", body);
+    }
+
+    [Fact]
+    public async Task GbkCharacterSplitAcrossBlocks_Preserved()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var bytes = Encoding.GetEncoding("GBK").GetBytes("中文");
+        using (var svc = new SerialCaptureService(Options(encoding: DataLogTextEncoding.Gbk)))
+        {
+            svc.Start();
+            foreach (byte b in bytes)
+                svc.Enqueue(DataDirection.SerialToNet, new[] { b });
+        }
+        Assert.Contains("中文", File.ReadAllText(WaitForFile(_dir)));
+    }
+
+    [Fact]
+    public void ExistingFullVolume_OnRestart_UsesNextVolume()
+    {
+        Directory.CreateDirectory(_dir);
+        var first = Path.Combine(_dir, "测试映射_20261011.log");
+        File.WriteAllText(first, "old-content");
+        var options = new SerialCaptureOptions
+        {
+            Directory = _dir, MappingName = "测试映射",
+            Clock = () => new DateTime(2026, 10, 11, 12, 0, 0),
+            MaxFileBytes = 4, MinFreeDiskBytes = 0
+        };
+        using (var svc = new SerialCaptureService(options))
+        {
+            svc.Start();
+            svc.Enqueue(DataDirection.SerialToNet, "new-content"u8.ToArray());
+        }
+        Assert.Equal("old-content", File.ReadAllText(first));
+        Assert.True(File.Exists(Path.Combine(_dir, "测试映射_20261011_002.log")));
+    }
+
 }

@@ -10,6 +10,8 @@ public partial class MonitorWindow : FluentWindow
     private static readonly Dictionary<Guid, MonitorWindow> OpenWindows = new();
 
     private readonly MonitorViewModel _viewModel;
+    private bool _programmaticScroll;
+    private bool _scrollScheduled;
 
     /// <summary>打开（或激活）指定映射的监控窗口。</summary>
     public static void OpenFor(MappingRuntime runtime)
@@ -44,10 +46,33 @@ public partial class MonitorWindow : FluentWindow
         {
             ncc.CollectionChanged += (_, _) =>
             {
-                if (_viewModel.AutoScroll && LinesList.Items.Count > 0)
-                    LinesList.ScrollIntoView(LinesList.Items[^1]);
+                if (_viewModel.AutoScroll && !_scrollScheduled && LinesList.Items.Count > 0)
+                {
+                    // Coalesce hundreds of CollectionChanged notifications per UI batch.
+                    _scrollScheduled = true;
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        _scrollScheduled = false;
+                        if (!_viewModel.AutoScroll || LinesList.Items.Count == 0) return;
+                        _programmaticScroll = true;
+                        try { LinesList.ScrollIntoView(LinesList.Items[^1]); }
+                        finally
+                        {
+                            Dispatcher.BeginInvoke(new Action(() => _programmaticScroll = false),
+                                System.Windows.Threading.DispatcherPriority.Background);
+                        }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
+                }
             };
         }
+    }
+
+    private void OnLinesScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
+    {
+        if (_programmaticScroll || e.ExtentHeightChange != 0 || e.ViewportHeightChange != 0)
+            return;
+        if (e.VerticalChange != 0)
+            _viewModel.AutoScroll = e.VerticalOffset + e.ViewportHeight >= e.ExtentHeight - 1;
     }
 
     private void OnHexModeChecked(object sender, System.Windows.RoutedEventArgs e)
