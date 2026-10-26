@@ -20,7 +20,9 @@ public static class AppServices
         System.Reflection.Assembly.GetExecutingAssembly().GetName().Version is { } v
             ? $"{v.Major}.{v.Minor}.{v.Build}" : "1.0.0";
 
-    private static readonly SemaphoreSlim _saveLock = new(1, 1);
+    private static readonly object _saveGate = new();
+    private static readonly object _shutdownGate = new();
+    private static Task? _shutdownTask;
 
     public static AppSettings Settings { get; private set; } = new();
     public static ConfigStore ConfigStore { get; private set; } = new();
@@ -64,8 +66,11 @@ public static class AppServices
     /// <summary>保存全部配置（映射列表 + 偏好）。</summary>
     public static void SaveSettings()
     {
-        Settings.Mappings = Manager.Mappings.Select(m => m.Config).ToList();
-        ConfigStore.Save(Settings);
+        lock (_saveGate)
+        {
+            Settings.Mappings = Manager.Mappings.Select(m => m.Config).ToList();
+            ConfigStore.Save(Settings);
+        }
     }
 
     /// <summary>静默保存（失败只记日志，不打断 UI 操作）。</summary>
@@ -82,7 +87,20 @@ public static class AppServices
     }
 
     /// <summary>退出前的清理：停所有映射、保存配置、刷新日志。</summary>
-    public static async Task ShutdownAsync()
+    public static Task ShutdownAsync()
+    {
+        lock (_shutdownGate)
+        {
+            // 拒绝第二实例时尚未加载配置，不能把默认值写回用户配置。
+            if (!_initialized) return Task.CompletedTask;
+
+            // OnExit 也可能被 WPF/安装器直接调用。清理从线程池启动，
+            // 所有嵌套 StopAsync 的 await 都不依赖即将停止的 UI 消息循环。
+            return _shutdownTask ??= Task.Run(ShutdownCoreAsync);
+        }
+    }
+
+    private static async Task ShutdownCoreAsync()
     {
         try
         {
