@@ -425,6 +425,117 @@ public sealed class BridgeTests : IAsyncLifetime
 
     // ---------- 辅助 ----------
 
+    [Fact]
+    public async Task FullSerialQueue_AppliesBackpressureWithoutDroppingTcpBytes()
+    {
+        using var writeGate = new ManualResetEventSlim(false);
+        _factory.StreamOpened += stream => stream.WriteGate = writeGate;
+        await using var rt = CreateRuntime();
+        await rt.StartAsync();
+        await WaitSerialOpen(rt);
+        var device = _factory.OpenedStreams.Single();
+        var acceptedLocalBlocks = 0;
+        var processed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            Assert.True(rt.WriteLocal([0xA5]));
+            acceptedLocalBlocks++;
+            await WaitUntil(() => device.WriteStarted.IsSet);
+            while (acceptedLocalBlocks < 100_000 && rt.WriteLocal([0xA5]))
+                acceptedLocalBlocks++;
+            Assert.InRange(acceptedLocalBlocks, 2, 99_999);
+
+            using var client = await ConnectAsync(_port);
+            await WaitUntil(() => rt.ClientCount == 1);
+            rt.Tcp.DataFromClient += (_, _) => processed.TrySetResult();
+            await client.GetStream().WriteAsync(new byte[] { 0x00, 0xFF, 0x7F });
+            await WaitUntil(() => rt.Tcp.Clients.Single().RecvBytes == 3);
+
+            // Once the receive is observed, completion must remain blocked until queue space is freed.
+            Assert.NotSame(processed.Task, await Task.WhenAny(processed.Task, Task.Delay(200)));
+            writeGate.Set();
+            await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await WaitUntil(() => device.DataWrittenByBridge.Sum(block => block.Length) >= acceptedLocalBlocks + 3);
+
+            var expected = Enumerable.Repeat((byte)0xA5, acceptedLocalBlocks)
+                .Concat(new byte[] { 0x00, 0xFF, 0x7F }).ToArray();
+            Assert.Equal(expected, device.DataWrittenByBridge.SelectMany(block => block).ToArray());
+        }
+        finally
+        {
+            writeGate.Set();
+        }
+    }
+
+    [Fact]
+    public async Task StopWhileWriting_RejectsNewDataAndDoesNotReplayToNextSerialSession()
+    {
+        using var writeGate = new ManualResetEventSlim(false);
+        _factory.StreamOpened += stream => stream.WriteGate = writeGate;
+        await using var rt = CreateRuntime();
+        await rt.StartAsync();
+        await WaitSerialOpen(rt);
+        var first = _factory.OpenedStreams.Single();
+        try
+        {
+            Assert.True(rt.WriteLocal([0x11]));
+            await WaitUntil(() => first.WriteStarted.IsSet);
+            Assert.True(rt.WriteLocal([0x33, 0x44]));
+            var stop = rt.StopAsync();
+
+            Assert.False(rt.WriteLocal([0xDE, 0xAD]));
+            writeGate.Set();
+            await stop.WaitAsync(TimeSpan.FromSeconds(8));
+            Assert.DoesNotContain(first.DataWrittenByBridge,
+                block => block.SequenceEqual(new byte[] { 0x33, 0x44 }));
+            await rt.StartAsync();
+            await WaitSerialOpen(rt);
+            var second = _factory.OpenedStreams.Last();
+            Assert.NotSame(first, second);
+            Assert.True(rt.WriteLocal([0x22]));
+            await WaitUntil(() => !second.DataWrittenByBridge.IsEmpty);
+            Assert.Equal(new byte[] { 0x22 }, second.DataWrittenByBridge.SelectMany(block => block).ToArray());
+        }
+        finally
+        {
+            writeGate.Set();
+        }
+    }
+
+    [Fact]
+    public async Task StopTimeout_RefusesRestartUntilPreviousWriterFinishes()
+    {
+        using var writeGate = new ManualResetEventSlim(false);
+        _factory.StreamOpened += stream => stream.WriteGate = writeGate;
+        await using var rt = CreateRuntime();
+        await rt.StartAsync();
+        await WaitSerialOpen(rt);
+        var first = _factory.OpenedStreams.Single();
+        try
+        {
+            Assert.True(rt.WriteLocal([0x11]));
+            await WaitUntil(() => first.WriteStarted.IsSet);
+            await rt.StopAsync().WaitAsync(TimeSpan.FromSeconds(8));
+
+            Assert.Equal(MappingState.Faulted, rt.State);
+            await rt.StartAsync();
+            Assert.Equal(MappingState.Faulted, rt.State);
+            Assert.Single(_factory.OpenedStreams);
+            Assert.False(rt.WriteLocal([0x22]));
+
+            writeGate.Set();
+            await rt.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await rt.StartAsync();
+            await WaitSerialOpen(rt);
+            Assert.Equal(2, _factory.OpenedStreams.Count);
+            Assert.Equal(MappingState.Running, rt.State);
+        }
+        finally
+        {
+            writeGate.Set();
+        }
+    }
+
     /// <summary>等待串口打开（FakePortFactory 打开总是成功；Faulted 时直接返回供故障类测试使用）。</summary>
     private static async Task WaitSerialOpen(MappingRuntime rt)
     {

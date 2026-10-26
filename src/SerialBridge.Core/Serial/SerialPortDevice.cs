@@ -81,7 +81,7 @@ public sealed class SerialPortDevice : IAsyncDisposable
             try
             {
                 // 读循环最长一个 ReadTimeout（200ms）后退出
-                await task.WaitAsync(TimeSpan.FromSeconds(3));
+                await task.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
             }
             catch { /* 超时/取消均按已停止处理 */ }
         }
@@ -94,13 +94,18 @@ public sealed class SerialPortDevice : IAsyncDisposable
     /// </summary>
     public async Task<bool> SendAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
     {
+        if (ct.IsCancellationRequested) return false;
         var stream = _current?.Stream;
         if (stream is null) return false;
         try
         {
             var buffer = data.ToArray();
             // 与读路径一致：同步 Write 由线程池执行，WriteTimeout 兜底防永久阻塞
-            await Task.Run(() => stream.Write(buffer, 0, buffer.Length), CancellationToken.None);
+            await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                stream.Write(buffer, 0, buffer.Length);
+            }, CancellationToken.None).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) { return false; }

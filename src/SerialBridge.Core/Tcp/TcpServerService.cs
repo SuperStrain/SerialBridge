@@ -23,6 +23,7 @@ public sealed class TcpClientConnection : IDisposable
     private readonly NetworkStream _stream;
     private readonly Channel<byte[]> _outbox;
     private CancellationTokenSource _cts = new();
+    private readonly CancellationToken _token;
 
     private Task? _recvTask;
     private Task? _sendTask;
@@ -38,6 +39,7 @@ public sealed class TcpClientConnection : IDisposable
 
     /// <summary>该客户端发来的数据（网络 → 串口方向）。后台线程触发。</summary>
     public event Action<TcpClientConnection, byte[]>? DataReceived;
+    internal Func<TcpClientConnection, byte[], CancellationToken, ValueTask>? ReceiveAsync { get; set; }
 
     /// <summary>连接结束（主动断开、异常或被服务端踢出）。后台线程触发。</summary>
     public event Action<TcpClientConnection, string>? Closed;
@@ -45,6 +47,7 @@ public sealed class TcpClientConnection : IDisposable
     internal TcpClientConnection(TcpClient client)
     {
         _client = client;
+        _token = _cts.Token;
         _stream = client.GetStream();
         RemoteEndPoint = client.Client.RemoteEndPoint?.ToString() ?? "未知";
         _outbox = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(SendQueueCapacity)
@@ -57,8 +60,8 @@ public sealed class TcpClientConnection : IDisposable
 
     internal void Start()
     {
-        _recvTask = Task.Run(() => RecvLoopAsync(_cts.Token));
-        _sendTask = Task.Run(() => SendLoopAsync(_cts.Token));
+        _recvTask = Task.Run(() => RecvLoopAsync(_token));
+        _sendTask = Task.Run(() => SendLoopAsync(_token));
     }
 
     /// <summary>将串口数据排入该客户端的发送队列。队列已满（慢速客户端）时断开连接。</summary>
@@ -91,6 +94,7 @@ public sealed class TcpClientConnection : IDisposable
             while (!ct.IsCancellationRequested)
             {
                 int n = await _stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+                ct.ThrowIfCancellationRequested();
                 if (n <= 0)
                 {
                     Closed?.Invoke(this, "客户端主动断开");
@@ -98,6 +102,8 @@ public sealed class TcpClientConnection : IDisposable
                 }
                 var chunk = buffer.AsSpan(0, n).ToArray();
                 Interlocked.Add(ref _recvBytes, n);
+                if (ReceiveAsync is { } receive)
+                    await receive(this, chunk, ct).ConfigureAwait(false);
                 DataReceived?.Invoke(this, chunk);
             }
         }
@@ -185,6 +191,7 @@ public sealed class TcpServerService : IAsyncDisposable
 
     /// <summary>某客户端发来数据（网络 → 串口方向）。后台线程触发。</summary>
     public event Action<TcpClientConnection, byte[]>? DataFromClient;
+    internal Func<TcpClientConnection, byte[], CancellationToken, ValueTask>? ReceiveFromClientAsync { get; set; }
 
     public TcpServerService(MappingConfig config) => _config = config;
 
@@ -240,6 +247,11 @@ public sealed class TcpServerService : IAsyncDisposable
                     continue;
                 }
 
+                if (ct.IsCancellationRequested)
+                {
+                    tcp.Dispose();
+                    break;
+                }
                 tcp.NoDelay = true;
                 var remote = tcp.Client.RemoteEndPoint?.ToString() ?? "未知";
                 var max = MaxClients();
@@ -254,9 +266,14 @@ public sealed class TcpServerService : IAsyncDisposable
 
                 var conn = new TcpClientConnection(tcp);
                 Interlocked.Increment(ref _totalAccepted);
-                conn.DataReceived += (c, data) =>
+                conn.ReceiveAsync = async (c, data, token) =>
                 {
-                    try { DataFromClient?.Invoke(c, data); }
+                    try
+                    {
+                        if (ReceiveFromClientAsync is { } receive)
+                            await receive(c, data, token).ConfigureAwait(false);
+                        DataFromClient?.Invoke(c, data);
+                    }
                     catch (Exception ex) { LogX.Error("客户端数据处理异常：" + ex.Message, ex); }
                 };
                 conn.Closed += OnConnectionClosed;
@@ -296,13 +313,13 @@ public sealed class TcpServerService : IAsyncDisposable
         _listening = false;
         _cts.Cancel();
         try { _listener?.Stop(); } catch { }
+        if (_acceptTask is not null)
+        {
+            try { await _acceptTask.ConfigureAwait(false); } catch { }
+        }
         foreach (var conn in _clients.Values)
             conn.Kick("服务端停止监听");
         _clients.Clear();
-        if (_acceptTask is not null)
-        {
-            try { await _acceptTask.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
-        }
         LogX.Info($"TCP 监听已停止：{_config.ListenIp}:{_config.ListenPort}");
     }
 
