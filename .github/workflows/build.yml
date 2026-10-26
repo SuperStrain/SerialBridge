@@ -192,7 +192,7 @@ jobs:
           $expected = '${{ needs.release-check.outputs.source_sha }}'
           $remote = git ls-remote origin refs/heads/main
           if ($LASTEXITCODE -ne 0 -or -not $remote) { throw 'Could not inspect remote main' }
-          $remoteSha = ($remote -split '\\s+')[0]
+          $remoteSha = ($remote -split '\s+')[0]
           if ($remoteSha -ne $expected) { throw 'main changed since eligibility check; stop to avoid stale release' }
           if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_COMMIT) { throw 'Build commit changed unexpectedly' }
           if ((git rev-parse HEAD).Trim() -ne $expected) {
