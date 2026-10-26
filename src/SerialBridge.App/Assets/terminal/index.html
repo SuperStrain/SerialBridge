@@ -59,8 +59,44 @@
   fitAddon.fit();
   term.focus();
 
+  // Ctrl + +/-/0 zooms terminal glyphs, not the WebView page and not the UART.
+  // Ctrl+Shift+= is '+' on US layouts; NumpadAdd/Subtract also work.
+  const FONT_MIN = 8, FONT_MAX = 28, FONT_DEFAULT = 14;
+  function changeFontSize(next) {
+    const size = Math.max(FONT_MIN, Math.min(FONT_MAX, next));
+    if (size === term.options.fontSize) return;
+    term.options.fontSize = size;
+    fitAddon.fit(); // Reflow terminal columns/rows after font metrics change.
+    findDirty = true;
+    if (findBar.classList.contains('visible')) findCount.textContent = '…';
+  }
+  function fontShortcut(event) {
+    if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey)
+      return false;
+    let action = null;
+    if (event.code === 'Equal' || event.code === 'NumpadAdd' ||
+        event.key === '+' || event.key === '=') action = 1;
+    else if (event.code === 'Minus' || event.code === 'NumpadSubtract' ||
+             event.key === '-' || event.key === '_') action = -1;
+    else if (event.code === 'Digit0' || event.code === 'Numpad0' ||
+             event.key === '0') action = 0;
+    if (action === null) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    changeFontSize(action === 0 ? FONT_DEFAULT : term.options.fontSize + action);
+    return true;
+  }
+  // Capture before xterm handles Ctrl+key sequences; also works in the search box.
+  document.addEventListener('keydown', fontShortcut, true);
+  document.addEventListener('wheel', event => {
+    if (!event.ctrlKey || event.altKey || event.metaKey) return;
+    event.preventDefault();
+    changeFontSize(term.options.fontSize + (event.deltaY < 0 ? 1 : -1));
+  }, { passive: false, capture: true });
+
   // 剪贴板由桌面宿主处理，避免浏览器快捷键和网页剪贴板权限干扰。
   term.attachCustomKeyEventHandler(event => {
+    if (event.type === 'keydown' && event.defaultPrevented) return false;
     if (event.altKey || event.metaKey) return true;
     const key = event.key.toLowerCase();
     if (key === 'escape' && findBar.classList.contains('visible')) {
@@ -364,6 +400,7 @@
     updateScrollState();
   };
   window.focusTerm = function () { term.focus(); };
+  window.getTerminalFontSize = function () { return term.options.fontSize; };
 
   window.chrome.webview.postMessage({ type: 'ready' });
 </script>
