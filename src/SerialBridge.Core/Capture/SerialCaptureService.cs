@@ -144,6 +144,13 @@ public sealed class SerialCaptureService : IDisposable
         // 落盘节奏：高流量时每 64KB flush；无论如何每 500ms flush 一次，
         // 保证低流量会话的数据最坏 0.5 秒内落盘（断电/崩溃最多丢最近半秒）
         var faultCooldownUntil = DateTime.MinValue;
+        void HandleWriteFault(Exception ex)
+        {
+            CloseWriter();
+            SetState(CaptureState.Faulted, $"写入失败：{ex.Message}（每 30 秒自动重试）");
+            LogX.Error($"串口日志写入异常堆栈：{ex}", ex);
+            faultCooldownUntil = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        }
         try
         {
             while (true)
@@ -177,15 +184,19 @@ public sealed class SerialCaptureService : IDisposable
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentOutOfRangeException)
                         {
                             CountDropped(e.Data.Length);
-                            CloseWriter();
-                            SetState(CaptureState.Faulted, $"写入失败：{ex.Message}（每 30 秒自动重试）");
-                            LogX.Error($"串口日志写入异常堆栈：{ex}", ex);
-                            faultCooldownUntil = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+                            HandleWriteFault(ex);
                             break;
                         }
                     }
                 }
-                if (_writer is not null) await _writer.FlushAsync(CancellationToken.None);
+                try
+                {
+                    if (_writer is not null) await _writer.FlushAsync(CancellationToken.None);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentOutOfRangeException)
+                {
+                    HandleWriteFault(ex);
+                }
                 if (_queue.Reader.Completion.IsCompleted) break;
             }
         }
@@ -360,7 +371,8 @@ public sealed class SerialCaptureService : IDisposable
 
     private void CloseWriter()
     {
-        try { _writer?.Flush(); _writer?.Dispose(); }
+        // Dispose flushes the writer and releases its stream even if that flush fails.
+        try { _writer?.Dispose(); }
         catch { }
         _writer = null;
     }

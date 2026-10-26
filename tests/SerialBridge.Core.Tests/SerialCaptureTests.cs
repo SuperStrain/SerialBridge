@@ -1,4 +1,8 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
+using SerialBridge.Core.Bridge;
 using SerialBridge.Core.Capture;
 using SerialBridge.Core.Models;
 
@@ -261,6 +265,105 @@ public sealed class SerialCaptureTests : IDisposable
         var body = File.ReadAllText(WaitForFile(_dir));
         Assert.Contains("line-000", body);
         Assert.Contains("line-099", body);
+    }
+
+    [Fact]
+    public async Task PeriodicFlushFailure_ReportsFaultAndResumesAfterCooldown()
+    {
+        using var svc = new SerialCaptureService(Options());
+        using var failedWriter = new FlushFailingWriter();
+        // Install only before Start: fault the disk boundary without adding a test API
+        // or racing the background writer's ownership of its stream.
+        typeof(SerialCaptureService).GetField("_writer", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(svc, failedWriter);
+        var faulted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recovered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        svc.StateChanged += () =>
+        {
+            if (svc.State == CaptureState.Faulted) faulted.TrySetResult();
+            if (svc.State == CaptureState.Recording && faulted.Task.IsCompleted) recovered.TrySetResult();
+        };
+
+        svc.Start();
+        // Empty queue: only the periodic flush can hit this injected failure.
+        await failedWriter.FlushAttempted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await faulted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(CaptureState.Faulted, svc.State);
+        Assert.Contains("simulated disk flush failure", svc.StateReason);
+        Assert.False(failedWriter.BaseStream.CanWrite);
+
+        svc.Enqueue(DataDirection.SerialToNet, "during-fault"u8.ToArray());
+        Assert.Equal(1, svc.DroppedBlocks);
+        Assert.Equal(12, svc.DroppedBytes);
+        await recovered.Task.WaitAsync(TimeSpan.FromSeconds(35));
+        Assert.Null(svc.StateReason);
+        svc.Enqueue(DataDirection.SerialToNet, "after-recovery"u8.ToArray());
+        svc.Dispose();
+
+        var body = File.ReadAllText(WaitForFile(_dir));
+        Assert.Contains("after-recovery", body);
+        Assert.DoesNotContain("during-fault", body);
+    }
+
+    [Fact]
+    public async Task CaptureFault_DoesNotInterruptBidirectionalForwarding()
+    {
+        Directory.CreateDirectory(_dir);
+        var invalidDirectory = Path.Combine(_dir, "file-instead-of-directory");
+        File.WriteAllText(invalidDirectory, "occupied");
+        var factory = new FakePortFactory();
+        var portReservation = new TcpListener(IPAddress.Loopback, 0);
+        portReservation.Start();
+        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
+        portReservation.Stop();
+        await using var runtime = new MappingRuntime(new MappingConfig
+        {
+            Name = "capture-fault",
+            ListenIp = "127.0.0.1",
+            ListenPort = port,
+            DataLog = new DataLogConfig { Enabled = true, Directory = invalidDirectory, Format = DataLogFormat.Hex },
+        }, factory);
+        await runtime.StartAsync();
+        await WaitUntilAsync(() => runtime.Serial.IsOpen);
+        Assert.NotNull(runtime.Capture);
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port);
+        await WaitUntilAsync(() => runtime.ClientCount == 1);
+        var device = factory.OpenedStreams.Single();
+        var payload = new byte[] { 0, 255, 13, 10, 1, 128 };
+
+        await device.SimulateDeviceSendAsync(payload);
+        var received = new byte[payload.Length];
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await client.GetStream().ReadExactlyAsync(received, timeout.Token);
+        Assert.Equal(payload, received);
+
+        await client.GetStream().WriteAsync(payload, timeout.Token);
+        await WaitUntilAsync(() => device.DataWrittenByBridge.Sum(block => block.Length) == payload.Length);
+        Assert.Equal(payload, device.DataWrittenByBridge.SelectMany(block => block).ToArray());
+        Assert.Equal(MappingState.Running, runtime.State);
+        Assert.True(runtime.Capture.DroppedBlocks >= 2);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!condition()) await Task.Delay(10, timeout.Token);
+    }
+
+    private sealed class FlushFailingWriter : StreamWriter
+    {
+        public TaskCompletionSource FlushAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public FlushFailingWriter() : base(new MemoryStream()) { }
+
+        public override void Flush() => throw new IOException("simulated disk flush failure");
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            FlushAttempted.TrySetResult();
+            return Task.FromException(new IOException("simulated disk flush failure"));
+        }
     }
 
     [Fact]
