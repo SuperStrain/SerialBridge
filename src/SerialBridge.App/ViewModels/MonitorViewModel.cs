@@ -34,7 +34,6 @@ public partial class MonitorLine : ObservableObject
 public partial class MonitorViewModel : ObservableObject
 {
     private const int MaxLines = 3000;          // UI 缓存上限
-    private const int MaxCaptureBytes = 8192;   // 单条记录捕获的字节上限（超出截断保存）
     private const int MaxDisplayBytes = 512;    // HEX/ASCII 显示的最大字节数
     private const int FlushIntervalMs = 150;
     private const int MaxPendingEntries = 3000;
@@ -86,7 +85,7 @@ public partial class MonitorViewModel : ObservableObject
         // 暂停显示时不丢统计，仅跳过记录
         if (Paused) return;
         var data = entry.Data.Length > MaxDisplayBytes ? entry.Data[..MaxDisplayBytes] : entry.Data;
-        _pending.Enqueue(new PendingItem(entry.TimeUtc, entry.Direction, (byte[])data.Clone()));
+        _pending.Enqueue(new PendingItem(entry.TimeUtc, entry.Direction, (byte[])data.Clone(), entry.Data.Length));
     }
 
     private void OnStatusChanged(MappingRuntime _)
@@ -125,9 +124,8 @@ public partial class MonitorViewModel : ObservableObject
 
     private MonitorLine BuildLine(PendingItem item)
     {
-        var capture = item.Data.Length > MaxCaptureBytes
-            ? item.Data[..MaxCaptureBytes] : item.Data;
-        var truncated = item.Data.Length - capture.Length;
+        var capture = item.Data;
+        var truncated = item.OriginalLength - capture.Length;
 
         var line = new MonitorLine
         {
@@ -277,5 +275,5 @@ public partial class MonitorViewModel : ObservableObject
         }
     }
 
-    private readonly record struct PendingItem(DateTime Time, DataDirection Direction, byte[] Data);
+    private readonly record struct PendingItem(DateTime Time, DataDirection Direction, byte[] Data, int OriginalLength);
 }
