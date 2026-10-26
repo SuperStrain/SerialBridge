@@ -1,5 +1,6 @@
 param(
-    [string]$OutputPath = (Join-Path $PSScriptRoot '..\src\SerialBridge.App\Assets\app.ico')
+    [string]$OutputPath = (Join-Path $PSScriptRoot '..\src\SerialBridge.App\Assets\app.ico'),
+    [string]$LogoOutputPath = (Join-Path $PSScriptRoot '..\src\SerialBridge.App\Assets\app-logo.png')
 )
 
 # The hand-drawn artwork is the canonical asset. Do not procedurally redraw
@@ -8,6 +9,11 @@ $ErrorActionPreference = 'Stop'
 $sourcePath = [System.IO.Path]::GetFullPath(
     (Join-Path $PSScriptRoot '..\src\SerialBridge.App\Assets\app.ico'))
 $targetPath = [System.IO.Path]::GetFullPath($OutputPath)
+$logoPath = [System.IO.Path]::GetFullPath($LogoOutputPath)
+if ($logoPath -eq $sourcePath -or $logoPath -eq $targetPath) {
+    throw 'Logo output must not overwrite the ICO asset'
+}
+$logoFrame = $null
 $requiredSizes = @(16, 20, 24, 32, 48, 64, 128, 256)
 
 if (-not [System.IO.File]::Exists($sourcePath)) {
@@ -63,6 +69,10 @@ try {
         if (-not $foundSizes.Add($width)) {
             throw "Duplicate ICO frame size: $width"
         }
+        if ($width -eq 256) {
+            $logoFrame = [byte[]]::new([int]$length)
+            [System.Array]::Copy($bytes, [int]$offset, $logoFrame, 0, [int]$length)
+        }
     }
     foreach ($size in $requiredSizes) {
         if (-not $foundSizes.Contains($size)) {
@@ -85,3 +95,10 @@ else {
     Write-Host "Validated existing app icon: $sourcePath"
 }
 Write-Host "Verified PNG icon frames: $($requiredSizes -join ', ')"
+
+# WPF ImageSourceConverter selects the ICO's first (16px) frame for an Image.
+# Extract the original 256px PNG bytes losslessly for the 42-DIP header logo.
+[System.IO.Directory]::CreateDirectory(
+    [System.IO.Path]::GetDirectoryName($logoPath)) | Out-Null
+[System.IO.File]::WriteAllBytes($logoPath, $logoFrame)
+Write-Host "Extracted original 256px logo: $logoPath"

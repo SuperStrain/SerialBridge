@@ -48,7 +48,8 @@ def main(exe_path: str, ico_path: str) -> int:
     # 组装 RT_GROUP_ICON（GRPICONDIRENTRY 中资源 ID 从 1 开始）
     group = struct.pack("<HHH", 0, 1, count)
     for rid, (w, h, bpp, frame) in enumerate(frames, start=1):
-        group += struct.pack("<BBBBHHII", w, h, 0, 0, 1, bpp, len(frame), rid)
+        # GRPICONDIRENTRY ends with a 16-bit resource ID, not an ICO's 32-bit offset.
+        group += struct.pack("<BBBBHHIH", w, h, 0, 0, 1, bpp, len(frame), rid)
 
     h = BeginUpdateResource(exe_path, False)
     if not h:
