@@ -313,23 +313,22 @@ public sealed class UpdateService : IDisposable
                 }
             }
 
-            // 原子替换最终文件；旧文件被占用（残留句柄/杀软扫描）时
-            // 直接使用新临时文件启动安装——下载已完成且校验通过，绝不能丢弃
+            // 原子替换最终文件；旧文件被占用或不可覆盖时保留新下载，
+            // 改为唯一的 .exe 路径，确保 ShellExecute 能按安装程序执行。
+            var completedPath = tempPath;
             try
             {
-                File.Move(tempPath, target, overwrite: true);
+                File.Move(completedPath, target, overwrite: true);
                 tempPath = null;
                 return target;
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                LogX.Warn($"升级包替换被占用（{ex.Message}），直接使用新临时文件启动安装。");
-                return tempPath;
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                LogX.Warn($"升级包替换被拒绝（{ex.Message}），直接使用新临时文件启动安装。");
-                return tempPath;
+                LogX.Warn($"升级包替换失败（{ex.Message}），改用独立安装包。");
+                var fallbackPath = Path.ChangeExtension(completedPath, ".exe");
+                File.Move(completedPath, fallbackPath);
+                tempPath = null;
+                return fallbackPath;
             }
         }
         catch (OperationCanceledException)
