@@ -136,6 +136,10 @@ jobs:
           } elseif ($LASTEXITCODE -ne 0) { throw 'Git diff failed' }
           "RELEASE_COMMIT=$(git rev-parse HEAD)" >> $env:GITHUB_ENV
 
+      - name: Prepare high-resolution logo from application icon
+        shell: pwsh
+        run: ./scripts/generate_icon.ps1
+
       - name: Publish self-contained Windows x64 application
         run: dotnet publish src/SerialBridge.App -c Release -r win-x64 --self-contained true -o dist/publish --nologo
 
