@@ -57,11 +57,15 @@ public sealed class SerialCaptureService : IDisposable
     private volatile CaptureState _state = CaptureState.Recording;
     private string? _stateReason;
     private long _droppedBlocks;
+    private long _droppedBytes;
+    private readonly Decoder _gbkDecoder = Encoding.GetEncoding("GBK").GetDecoder();
+    private bool _stopping;
 
     public CaptureState State => _state;
     public string? StateReason { get; private set; }
     public string? CurrentFile { get; private set; }
     public long DroppedBlocks => Interlocked.Read(ref _droppedBlocks);
+    public long DroppedBytes => Interlocked.Read(ref _droppedBytes);
 
     /// <summary>状态变化（后台线程触发；UI 侧自行调度）。</summary>
     public event Action? StateChanged;
@@ -72,7 +76,7 @@ public sealed class SerialCaptureService : IDisposable
         _queue = Channel.CreateBounded<CaptureEntry>(new BoundedChannelOptions(_opt.QueueCapacity)
         {
             SingleReader = true,
-            FullMode = BoundedChannelFullMode.DropOldest,   // 溢出丢最旧，保护主链路与内存
+            FullMode = BoundedChannelFullMode.Wait,   // TryWrite false on full; never silently drop
         });
     }
 
@@ -95,23 +99,40 @@ public sealed class SerialCaptureService : IDisposable
     /// </summary>
     public void Enqueue(DataDirection direction, byte[] data)
     {
-        if (State != CaptureState.Recording) return;
-        var copy = new byte[data.Length];
-        Array.Copy(data, copy, data.Length);
+        if (_stopping || State != CaptureState.Recording)
+        {
+            CountDropped(data.Length);
+            return;
+        }
+        // Text capture is device output only; do not waste queue capacity on IN.
+        if (_opt.Format == DataLogFormat.Text && direction != DataDirection.SerialToNet) return;
+        var copy = (byte[])data.Clone();
         if (!_queue.Writer.TryWrite(new CaptureEntry(_opt.Clock(), direction, copy)))
-            Interlocked.Increment(ref _droppedBlocks);
+            CountDropped(copy.Length);
+    }
+
+    private void CountDropped(int length)
+    {
+        Interlocked.Increment(ref _droppedBlocks);
+        Interlocked.Add(ref _droppedBytes, length);
     }
 
     public void Dispose()
     {
+        _stopping = true;
+        _queue.Writer.TryComplete();
         try
         {
-            _queue.Writer.TryComplete();
-            _cts.Cancel();
-            _writerTask?.Wait(TimeSpan.FromSeconds(3));
+            // Normal stop drains accepted items instead of immediately canceling.
+            if (_writerTask is { } task && !task.Wait(TimeSpan.FromSeconds(5)))
+            {
+                LogX.Warn("串口日志停止超时，取消未完成写入");
+                _cts.Cancel();
+                task.Wait(TimeSpan.FromSeconds(2));
+            }
         }
-        catch { /* 停止超时按已关闭处理 */ }
-        _cts.Dispose();
+        catch (AggregateException ex) { LogX.Warn($"串口日志停止异常：{ex.GetBaseException().Message}"); }
+        if (_writerTask is null || _writerTask.IsCompleted) _cts.Dispose();
     }
 
     // ---------- 内部实现 ----------
@@ -122,64 +143,50 @@ public sealed class SerialCaptureService : IDisposable
     {
         // 落盘节奏：高流量时每 64KB flush；无论如何每 500ms flush 一次，
         // 保证低流量会话的数据最坏 0.5 秒内落盘（断电/崩溃最多丢最近半秒）
-        var flushInterval = TimeSpan.FromMilliseconds(500);
         var faultCooldownUntil = DateTime.MinValue;
-
         try
         {
-            while (!ct.IsCancellationRequested)
+            while (true)
             {
-                var wrote = false;
+                // A timed wait doesn't leave abandoned channel read waiters.
+                using var poll = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                poll.CancelAfter(TimeSpan.FromMilliseconds(500));
+                bool available;
+                try { available = await _queue.Reader.WaitToReadAsync(poll.Token); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { available = false; }
+                if (ct.IsCancellationRequested) break;
 
-                try
+                if (State == CaptureState.DiskShortage && DiskHasSpace())
+                    SetState(CaptureState.Recording, null);
+                if (State == CaptureState.Faulted && DateTime.UtcNow >= faultCooldownUntil)
+                    SetState(CaptureState.Recording, null);
+
+                if (available)
                 {
-                    // 最多等一个 flush 周期；期间有数据立即醒来
-                    var waitTask = _queue.Reader.WaitToReadAsync(ct).AsTask();
-                    var completed = await Task.WhenAny(waitTask, Task.Delay(flushInterval, ct));
-                    if (completed == waitTask && waitTask.Result)
+                    while (_queue.Reader.TryRead(out var e))
                     {
-                        while (_queue.Reader.TryRead(out var e))
+                        if (State != CaptureState.Recording)
                         {
-                            if (State == CaptureState.DiskShortage)
-                            {
-                                if (!DiskHasSpace()) continue;      // 仍不足：丢弃（保护主链路）
-                                SetState(CaptureState.Recording, null);   // 空间恢复
-                            }
-                            try
-                            {
-                                await WriteEntryAsync(e, ct);
-                                wrote = true;
-                            }
-                            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentOutOfRangeException)
-                            {
-                                // 单块写入失败：丢弃该块并降级重试，绝不终止写线程
-                                CloseWriter();
-                                SetState(CaptureState.Faulted, $"写入失败：{ex.Message}（每 30 秒自动重试）");
-                                LogX.Error($"串口日志写入异常堆栈：{ex}", ex);
-                                faultCooldownUntil = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-                                break;
-                            }
+                            CountDropped(e.Data.Length);
+                            continue;
+                        }
+                        try
+                        {
+                            await WriteEntryAsync(e, ct);
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentOutOfRangeException)
+                        {
+                            CountDropped(e.Data.Length);
+                            CloseWriter();
+                            SetState(CaptureState.Faulted, $"写入失败：{ex.Message}（每 30 秒自动重试）");
+                            LogX.Error($"串口日志写入异常堆栈：{ex}", ex);
+                            faultCooldownUntil = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+                            break;
                         }
                     }
                 }
-                catch (OperationCanceledException) { break; }
-
-                if (State == CaptureState.Faulted)
-                {
-                    if (DateTime.UtcNow < faultCooldownUntil)
-                    {
-                        try { await Task.Delay(TimeSpan.FromSeconds(1), ct); }
-                        catch (OperationCanceledException) { break; }
-                        continue;
-                    }
-                    SetState(CaptureState.Recording, null);   // 冷却结束，重试
-                }
-
-                // 周期性 flush（无论本周期是否有新数据）
-                if (_writer is not null && wrote)
-                    await _writer.FlushAsync(CancellationToken.None);
-                else if (_writer is not null)
-                    await _writer.FlushAsync(CancellationToken.None);   // 空闲 flush 幂等，兜底低流量
+                if (_writer is not null) await _writer.FlushAsync(CancellationToken.None);
+                if (_queue.Reader.Completion.IsCompleted) break;
             }
         }
         catch (OperationCanceledException) { }
@@ -197,7 +204,7 @@ public sealed class SerialCaptureService : IDisposable
     {
         EnsureWriter(e.Time);
 
-        if (_writer is null) return;   // 打开失败（已降级），本块丢弃
+        if (_writer is null) { CountDropped(e.Data.Length); return; }
 
         if (_opt.Format == DataLogFormat.Text)
         {
@@ -281,8 +288,9 @@ public sealed class SerialCaptureService : IDisposable
         }
         else
         {
-            var text = Encoding.GetEncoding("GBK").GetString(slice);
-            var utf8 = Encoding.UTF8.GetBytes(text);
+            var chars = new char[Encoding.GetEncoding("GBK").GetMaxCharCount(slice.Length)];
+            var count = _gbkDecoder.GetChars(slice, chars, flush: false);
+            var utf8 = Encoding.UTF8.GetBytes(chars, 0, count);
             await stream.WriteAsync(utf8, ct);
             _currentFileSize += utf8.Length;
         }
@@ -315,11 +323,25 @@ public sealed class SerialCaptureService : IDisposable
                 _currentDate = date;
                 _currentVolume = 0;
             }
-            _currentVolume++;
 
-            var volumeSuffix = _currentVolume > 1 ? $"_{_currentVolume:D3}" : "";
             var name = SanitizeName(_opt.MappingName);
-            _currentFile = Path.Combine(_opt.Directory, $"{name}_{date}{volumeSuffix}.log");
+            string Candidate(int volume) => Path.Combine(_opt.Directory,
+                $"{name}_{date}{(volume > 1 ? $"_{volume:D3}" : "")}.log");
+            // Resume the last existing volume on restart, without appending
+            // to an already-full file or reusing an earlier numbered volume.
+            if (_currentVolume == 0)
+            {
+                while (File.Exists(Candidate(_currentVolume + 1)))
+                    _currentVolume++;
+                if (_currentVolume == 0 || new FileInfo(Candidate(_currentVolume)).Length >= _opt.MaxFileBytes)
+                    _currentVolume++;
+            }
+            else
+            {
+                _currentVolume++;
+                while (File.Exists(Candidate(_currentVolume))) _currentVolume++;
+            }
+            _currentFile = Candidate(_currentVolume);
 
             _writer = new StreamWriter(
                 new FileStream(_currentFile, FileMode.Append, FileAccess.Write, FileShare.Read),
