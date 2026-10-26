@@ -11,6 +11,7 @@ public partial class MonitorWindow : FluentWindow
 
     private readonly MonitorViewModel _viewModel;
     private bool _programmaticScroll;
+    private bool _scrollScheduled;
 
     /// <summary>打开（或激活）指定映射的监控窗口。</summary>
     public static void OpenFor(MappingRuntime runtime)
@@ -45,15 +46,22 @@ public partial class MonitorWindow : FluentWindow
         {
             ncc.CollectionChanged += (_, _) =>
             {
-                if (_viewModel.AutoScroll && LinesList.Items.Count > 0)
+                if (_viewModel.AutoScroll && !_scrollScheduled && LinesList.Items.Count > 0)
                 {
-                    _programmaticScroll = true;
-                    try { LinesList.ScrollIntoView(LinesList.Items[^1]); }
-                    finally
+                    // Coalesce hundreds of CollectionChanged notifications per UI batch.
+                    _scrollScheduled = true;
+                    Dispatcher.BeginInvoke(new Action(() =>
                     {
-                        Dispatcher.BeginInvoke(new Action(() => _programmaticScroll = false),
-                            System.Windows.Threading.DispatcherPriority.Background);
-                    }
+                        _scrollScheduled = false;
+                        if (!_viewModel.AutoScroll || LinesList.Items.Count == 0) return;
+                        _programmaticScroll = true;
+                        try { LinesList.ScrollIntoView(LinesList.Items[^1]); }
+                        finally
+                        {
+                            Dispatcher.BeginInvoke(new Action(() => _programmaticScroll = false),
+                                System.Windows.Threading.DispatcherPriority.Background);
+                        }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
                 }
             };
         }
