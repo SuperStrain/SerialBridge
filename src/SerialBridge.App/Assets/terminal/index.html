@@ -91,6 +91,7 @@
   document.addEventListener('wheel', event => {
     if (!event.ctrlKey || event.altKey || event.metaKey) return;
     event.preventDefault();
+    event.stopPropagation(); // Do not forward Ctrl+wheel to xterm mouse/alternate-screen handlers.
     changeFontSize(term.options.fontSize + (event.deltaY < 0 ? 1 : -1));
   }, { passive: false, capture: true });
 
