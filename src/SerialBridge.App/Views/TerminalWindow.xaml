@@ -127,7 +127,7 @@
 
         <Border Grid.Row="3" Background="#181825" Padding="14,6">
             <TextBlock FontSize="11.5" Foreground="#9399B2" TextWrapping="Wrap"
-                       Text="逐键透传模式：所有按键（含 Tab/Ctrl+C/方向键）直接发送到设备，回显由设备决定——与 Xshell 串口一致。查找：Ctrl+F / F3；上翻暂停自动跟随，点击“回到底部”恢复；复制：Ctrl+Shift+C；粘贴：Ctrl+Shift+V" />
+                       Text="逐键透传模式：所有按键（含 Tab/Ctrl+C/方向键）直接发送到设备，回显由设备决定——与 Xshell 串口一致。查找：Ctrl+F / F3；上翻暂停自动跟随，点击“回到底部”恢复；字体：Ctrl + + / -，Ctrl+0 恢复，Ctrl+滚轮缩放；复制：Ctrl+Shift+C；粘贴：Ctrl+Shift+V" />
         </Border>
     </Grid>
 </ui:FluentWindow>
