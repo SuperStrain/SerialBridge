@@ -207,10 +207,16 @@ public sealed class TerminalWorkspaceWindow : Wpf.Ui.Controls.FluentWindow
     {
         lock (EnvironmentLock)
         {
-            return _environmentTask ??= CoreWebView2Environment.CreateAsync(
-                null,
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SerialBridge", "WebView2"));
+            // A failed/cancelled environment must not poison every later tab.
+            if (_environmentTask is null || _environmentTask.IsFaulted || _environmentTask.IsCanceled)
+            {
+                var task = CoreWebView2Environment.CreateAsync(
+                    null,
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "SerialBridge", "WebView2"));
+                _environmentTask = task;
+            }
+            return _environmentTask;
         }
     }
 
