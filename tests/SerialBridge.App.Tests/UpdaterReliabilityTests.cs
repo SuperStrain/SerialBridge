@@ -99,6 +99,54 @@ public sealed class UpdaterReliabilityTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DownloadInstaller_UnavailableTargetPreservesOldFileAndReturnsCompleteExecutable(bool readOnlyTarget)
+    {
+        const int payloadSize = 10 * 1024 * 1024 + 1;
+        const string fileName = "SerialBridge-Setup-1.4.0-x64.exe";
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var serverTask = ServeInstallerOnceAsync(listener, payloadSize);
+        var directory = Path.Combine(Path.GetTempPath(), "SerialBridge.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var target = Path.Combine(directory, fileName);
+        var oldContents = Encoding.ASCII.GetBytes("previous installer");
+        await File.WriteAllBytesAsync(target, oldContents);
+        using var service = new UpdateService(new FakeUpdateEnvironment(), directory);
+        var info = new UpdateInfo("1.4.0", $"http://127.0.0.1:{port}/{fileName}", "", false);
+
+        try
+        {
+            if (readOnlyTarget) File.SetAttributes(target, FileAttributes.ReadOnly);
+            using var lockedTarget = readOnlyTarget ? null
+                : new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+            var downloadedPath = await service.DownloadInstallerAsync(info, progress: null);
+            await serverTask;
+
+            Assert.NotNull(downloadedPath);
+            Assert.True(Path.IsPathFullyQualified(downloadedPath));
+            Assert.Equal(".exe", Path.GetExtension(downloadedPath));
+            Assert.NotEqual(target, downloadedPath);
+            Assert.Equal(directory, Path.GetDirectoryName(downloadedPath));
+            var expectedPayload = new byte[payloadSize];
+            expectedPayload[0] = (byte)'M';
+            expectedPayload[1] = (byte)'Z';
+            Assert.Equal(expectedPayload, await File.ReadAllBytesAsync(downloadedPath));
+            Assert.Equal(oldContents, await File.ReadAllBytesAsync(target));
+            Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
+        }
+        finally
+        {
+            listener.Stop();
+            if (File.Exists(target)) File.SetAttributes(target, FileAttributes.Normal);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static async Task ServeInstallerOnceAsync(TcpListener listener, int payloadSize)
     {
         using var client = await listener.AcceptTcpClientAsync();

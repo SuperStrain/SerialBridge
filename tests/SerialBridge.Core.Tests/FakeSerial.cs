@@ -20,6 +20,8 @@ public sealed class FakePortStream : Stream
     public ConcurrentQueue<byte[]> DataWrittenByBridge => _writtenToPin;
 
     public bool IsDisposed { get; private set; }
+    public ManualResetEventSlim? WriteGate { get; set; }
+    public ManualResetEventSlim WriteStarted { get; } = new(false);
 
     public override bool CanRead => !IsDisposed;
     public override bool CanSeek => false;
@@ -93,7 +95,13 @@ public sealed class FakePortStream : Stream
         }
     }
 
-    public override void Write(byte[] buffer, int offset, int count) => _writtenToPin.Enqueue(buffer[offset..(offset + count)]);
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        WriteStarted.Set();
+        WriteGate?.Wait();
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        _writtenToPin.Enqueue(buffer[offset..(offset + count)]);
+    }
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
 

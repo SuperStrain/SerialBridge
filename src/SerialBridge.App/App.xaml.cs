@@ -8,6 +8,9 @@ namespace SerialBridge.App;
 public partial class App : Application
 {
     private IDisposable? _releaseGuard;
+    private Task? _shutdownTask;
+
+    internal bool IsShutdownReady { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -16,6 +19,7 @@ public partial class App : Application
         // 同一时刻仅允许一个实例
         if (!SingleInstanceGuard.TryAcquire(out var releaseGuard))
         {
+            releaseGuard.Dispose();
             MessageBox.Show("SerialBridge 已经在运行中。", "SerialBridge",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
@@ -37,9 +41,26 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        AppServices.ShutdownAsync().Wait(TimeSpan.FromSeconds(8));
-        _releaseGuard?.Dispose();
-        base.OnExit(e);
+        try
+        {
+            // 托盘退出已经 await 清理；直接 Shutdown 或系统关闭也必须完成清理。
+            // AppServices 的任务在后台运行，不会等待当前 UI 上下文。
+            AppServices.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            _releaseGuard?.Dispose();
+            base.OnExit(e);
+        }
+    }
+
+    internal Task RequestShutdownAsync() => _shutdownTask ??= ShutdownAfterCleanupAsync();
+
+    private async Task ShutdownAfterCleanupAsync()
+    {
+        await AppServices.ShutdownAsync();
+        IsShutdownReady = true;
+        Shutdown();
     }
 
     public static void ApplyTheme(string theme)

@@ -56,16 +56,17 @@ public partial class MainWindow : FluentWindow
         // 最小化：保留任务栏图标（普通最小化行为），不再隐藏进托盘
     }
 
-    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    private async void OnWindowClosing(object? sender, CancelEventArgs e)
     {
-        // 从托盘菜单明确退出：直接关闭
+        var app = (App)Application.Current;
+        if (app.IsShutdownReady) return;
+
+        // 消息循环保持运行直到异步清理完成，再由 Application.Shutdown 关闭窗口。
         if (_exitFromTray)
         {
-            _viewModel.Shutdown();
-            _trayIcon?.Dispose();
-            // ShutdownMode=OnExplicitShutdown 下仅关窗不会结束进程，必须显式 Shutdown
-            // （否则消息循环仍在，进程残留任务管理器，OnExit 清理也不会执行）
-            Application.Current.Shutdown();
+            e.Cancel = true;
+            IsEnabled = false;
+            await app.RequestShutdownAsync();
             return;
         }
 
@@ -78,6 +79,13 @@ public partial class MainWindow : FluentWindow
             _trayIcon?.ShowNotification("SerialBridge 仍在运行",
                 "窗口已收起到系统托盘（屏幕右下角时钟区域），映射保持运行。点击托盘图标可恢复窗口，彻底退出请用托盘右键菜单的“退出”。");
         }
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _viewModel.Shutdown();
+        _trayIcon?.Dispose();
+        base.OnClosed(e);
     }
 
     // ---------- 托盘菜单 ----------
