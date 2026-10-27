@@ -67,7 +67,25 @@ public sealed class TerminalWorkspaceWindow : Wpf.Ui.Controls.FluentWindow
         Background = new SolidColorBrush(Color.FromRgb(30, 30, 46));
         _tabs.Background = Background;
         _tabs.SelectionChanged += (_, _) => FocusActiveSession();
-        Content = _tabs;
+        var root = new DockPanel();
+        var toolbar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(8, 6, 12, 6)
+        };
+        var clear = new Button
+        {
+            Content = "清屏",
+            ToolTip = "只清除当前标签的本地终端显示，不向设备发送任何命令",
+            Padding = new Thickness(12, 5, 12, 5)
+        };
+        clear.Click += (_, _) => ClearActiveTab();
+        toolbar.Children.Add(clear);
+        DockPanel.SetDock(toolbar, Dock.Top);
+        root.Children.Add(toolbar);
+        root.Children.Add(_tabs);
+        Content = root;
         PreviewKeyDown += OnShortcutKeyDown;
         Closed += (_, _) =>
         {
@@ -99,6 +117,13 @@ public sealed class TerminalWorkspaceWindow : Wpf.Ui.Controls.FluentWindow
         var index = _tabs.SelectedIndex;
         _tabs.SelectedIndex = (index + delta + _tabs.Items.Count) % _tabs.Items.Count;
         FocusActiveSession();
+    }
+
+    private void ClearActiveTab()
+    {
+        if (_tabs.SelectedItem is TabItem tab && tab.Tag is Session session &&
+            session.Ready && !session.Closed)
+            _ = session.Web.ExecuteScriptAsync("window.clearTerm()");
     }
 
     private void CloseActiveTab()
@@ -240,14 +265,19 @@ public sealed class TerminalWorkspaceWindow : Wpf.Ui.Controls.FluentWindow
                 return;
             }
 
-            // Strict active-tab ownership: a stale WebView event must never send
-            // bytes to a device after switching to a different tab.
-            if (!session.Ready || !ReferenceEquals(_tabs.SelectedItem, session.Tab)) return;
+            if (!session.Ready) return;
+            var isActive = ReferenceEquals(_tabs.SelectedItem, session.Tab);
             if (type == "input")
             {
                 var text = data.GetProperty("text").GetString();
-                if (text is not null) session.Runtime.WriteLocal(Encoding.UTF8.GetBytes(text));
+                if (text is null) return;
+                // xterm emits some protocol replies through onData as well as user
+                // keypresses. Background tabs must answer DA/DSR requests, while
+                // ordinary keyboard sequences from an inactive tab stay blocked.
+                if (isActive || IsTerminalProtocolReply(text))
+                    session.Runtime.WriteLocal(Encoding.UTF8.GetBytes(text));
             }
+            else if (!isActive) return;
             else if (type == "copy")
             {
                 var text = data.GetProperty("text").GetString();
@@ -263,6 +293,16 @@ public sealed class TerminalWorkspaceWindow : Wpf.Ui.Controls.FluentWindow
         {
             System.Diagnostics.Debug.WriteLine("workspace terminal message: " + ex.Message);
         }
+    }
+
+    private static bool IsTerminalProtocolReply(string text)
+    {
+        // Terminal-generated Device Status Reports: ESC[0n / ESC[3n,
+        // Cursor Position Report: ESC[row;colR,
+        // Primary / secondary Device Attributes: ESC[?params c, ESC[>params c.
+        // Do not allow arbitrary escape/control data from inactive tabs.
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            text, @"^\x1b\[(?:[0-9]{1,3}n|[0-9]{1,4};[0-9]{1,4}R|[?>][0-9;]{0,32}c)$");
     }
 
     private void RemoveTab(Session session)
