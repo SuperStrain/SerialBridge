@@ -59,6 +59,19 @@
   fitAddon.fit();
   term.focus();
 
+  // Workspace shortcuts are UI-only and must not reach the serial device.
+  // Capture before xterm translates Ctrl+Tab or Ctrl+W into terminal input.
+  document.addEventListener('keydown', event => {
+    if (!event.ctrlKey || event.altKey || event.metaKey) return;
+    let action = null;
+    if (event.code === 'Tab') action = event.shiftKey ? 'previous' : 'next';
+    else if (event.code === 'KeyW' && !event.shiftKey) action = 'close';
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.chrome.webview.postMessage({ type: 'workspace-shortcut', action });
+  }, true);
+
   // Ctrl + +/-/0 zooms terminal glyphs, not the WebView page and not the UART.
   // Ctrl+Shift+= is '+' on US layouts; NumpadAdd/Subtract also work.
   const FONT_MIN = 8, FONT_MAX = 28, FONT_DEFAULT = 14;
