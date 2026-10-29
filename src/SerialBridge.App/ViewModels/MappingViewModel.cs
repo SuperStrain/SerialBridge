@@ -177,7 +177,7 @@ public partial class MappingViewModel : ObservableObject
     private void OpenClients() => ClientsWindow.OpenFor(Runtime);
 
     [RelayCommand]
-    private void OpenTerminal() => TerminalWindow.OpenFor(Runtime);
+    private void OpenTerminal() => TerminalWorkspaceWindow.OpenFor(Runtime);
 
     [RelayCommand]
     private void OpenCaptureFolder()
