@@ -278,7 +278,7 @@ public sealed class TerminalWorkspaceWindow : Wpf.Ui.Controls.FluentWindow
                 var text = data.GetProperty("text").GetString();
                 if (text is null) return;
                 // xterm emits some protocol replies through onData as well as user
-                // keypresses. Background tabs must answer DA/DSR requests, while
+                // keypresses. Background tabs must answer terminal queries, while
                 // ordinary keyboard sequences from an inactive tab stay blocked.
                 if (isActive || IsTerminalProtocolReply(text))
                     session.Runtime.WriteLocal(Encoding.UTF8.GetBytes(text));
@@ -303,12 +303,31 @@ public sealed class TerminalWorkspaceWindow : Wpf.Ui.Controls.FluentWindow
 
     private static bool IsTerminalProtocolReply(string text)
     {
-        // Terminal-generated Device Status Reports: ESC[0n / ESC[3n,
-        // Cursor Position Report: ESC[row;colR,
-        // Primary / secondary Device Attributes: ESC[?params c, ESC[>params c.
-        // Do not allow arbitrary escape/control data from inactive tabs.
+        // Match the automatic reports emitted by the bundled xterm.js: DSR/CPR,
+        // DA, DECRQM, window/focus reports, OSC colors and DCS DECRQSS.
+        // Bound every field and require the entire message (including its end)
+        // to match; ordinary inactive-tab input must still be discarded.
         return System.Text.RegularExpressions.Regex.IsMatch(
-            text, @"^\x1b\[(?:[0-9]{1,3}n|[0-9]{1,4};[0-9]{1,4}R|[?>][0-9;]{0,32}c)$");
+            text,
+            """
+            \A\x1b(?:
+                \[(?:
+                    [03]n
+                    | \??[0-9]{1,5};[0-9]{1,5}R
+                    | [?>][0-9]{1,5}(?:;[0-9]{1,5}){0,15}c
+                    | \??[0-9]{1,5};[0-4]\$y
+                    | [468];[0-9]{1,5};[0-9]{1,5}t
+                    | [IO]
+                )
+                | \](?:4;[0-9]{1,3}|1[012]);rgb:
+                    [0-9a-fA-F]{1,4}/[0-9a-fA-F]{1,4}/[0-9a-fA-F]{1,4}\x1b\\
+                | P(?:0\$r|1\$r(?:
+                    [01]"q | 61;1"p | [0-9]{1,5};[0-9]{1,5}r | 0m | [1-6]\x20q
+                ))\x1b\\
+            )\z
+            """,
+            System.Text.RegularExpressions.RegexOptions.IgnorePatternWhitespace |
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
     private void RemoveTab(Session session)
