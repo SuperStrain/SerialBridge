@@ -88,6 +88,15 @@ public sealed class ConfigStore
     {
         s.General ??= new GeneralSettings();
         s.General.LogRetentionDays = Math.Clamp(s.General.LogRetentionDays, 1, 365);
+        s.CommandPresets ??= new List<CommandPreset>();
+        s.CommandPresets = s.CommandPresets.Where(p => p is not null).Take(200).ToList();
+        foreach (var p in s.CommandPresets)
+        {
+            if (p.Id == Guid.Empty) p.Id = Guid.NewGuid();
+            p.Name = string.IsNullOrWhiteSpace(p.Name) ? "未命名命令" : p.Name.Trim();
+            p.Steps ??= new List<CommandStep>();
+            p.Steps = p.Steps.Where(step => step is not null).Take(100).ToList();
+        }
         s.Mappings ??= new List<MappingConfig>();
         var seenIds = new HashSet<Guid>();
         var usedPorts = new HashSet<int>();

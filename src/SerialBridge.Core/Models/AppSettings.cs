@@ -31,4 +31,7 @@ public sealed class AppSettings
     public List<MappingConfig> Mappings { get; set; } = new();
 
     public GeneralSettings General { get; set; } = new();
+
+    /// <summary>Shared, user-defined serial command shortcuts and macros.</summary>
+    public List<CommandPreset> CommandPresets { get; set; } = new();
 }

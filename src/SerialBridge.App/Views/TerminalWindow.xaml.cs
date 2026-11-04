@@ -166,6 +166,19 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
+    // Open a modal palette so terminal typing cannot accidentally mix with macro execution.
+    private void OnCommandsClick(object sender, RoutedEventArgs e)
+    {
+        if (_lifetime.IsClosing) return;
+        var dialog = new CommandPaletteWindow(_runtime) { Owner = this };
+        dialog.ShowDialog();
+        if (_ready && !_lifetime.IsClosing)
+        {
+            Web.Focus();
+            _ = Web.ExecuteScriptAsync("window.focusTerm()");
+        }
+    }
+
     // JS 按键 → 串口
     private void OnFindText(object sender, RoutedEventArgs e)
     {

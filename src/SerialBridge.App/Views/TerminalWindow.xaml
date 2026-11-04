@@ -101,6 +101,8 @@
                         <Run Text="↑ " /><Run Text="{Binding TxText, Mode=OneWay}" />
                         <Run Text="  ↓ " /><Run Text="{Binding RxText, Mode=OneWay}" />
                     </TextBlock>
+                    <ui:Button Content="快捷命令 / 宏" Click="OnCommandsClick" Margin="0,0,8,0"
+                               ToolTip="保存常用串口命令、HEX 数据或分步宏" />
                     <ui:Button Content="搜索" Click="OnFindText" Margin="0,0,8,0"
                                ToolTip="搜索终端历史输出（Ctrl+F）" />
                     <ui:Button Content="清屏" Click="OnClearScreen"
