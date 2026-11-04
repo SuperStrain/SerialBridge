@@ -24,7 +24,7 @@ public sealed class CommandPaletteWindow : Window
     {
         AutoGenerateColumns = false, CanUserAddRows = false,
         CanUserDeleteRows = false, HeadersVisibility = DataGridHeadersVisibility.Column,
-        MinHeight = 220, SelectionMode = DataGridSelectionMode.Single
+        MinHeight = 220, Height = 290, SelectionMode = DataGridSelectionMode.Single
     };
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap };
     private readonly Button _run = new() { Content = "发送 / 运行宏" };
@@ -112,7 +112,7 @@ public sealed class CommandPaletteWindow : Window
             if (_list.SelectedItem is CommandPreset p && !_running)
             {
                 p.Name = _name.Text;
-                _list.Items.Refresh();
+                // List selection remains stable while the name is being edited.
             }
         };
         _confirm.Margin = new Thickness(0, 10, 0, 10);
