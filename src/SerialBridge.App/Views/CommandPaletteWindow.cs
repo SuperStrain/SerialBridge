@@ -211,29 +211,37 @@ public sealed class CommandPaletteWindow : Window
         _steps.ItemsSource = p.Steps;
     }
 
-    private bool ValidateAndCommit()
+    private void CommitPendingEdit()
     {
-        _steps.CommitEdit(DataGridEditingUnit.Cell, true);
-        _steps.CommitEdit(DataGridEditingUnit.Row, true);
-        foreach (var preset in _presets)
-        {
-            if (string.IsNullOrWhiteSpace(preset.Name) || preset.Name.Length > 80)
-                throw new FormatException("预设名称必须为 1–80 个字符。");
-            if (preset.Steps is null || preset.Steps.Count is < 1 or > 100)
-                throw new FormatException($"「{preset.Name}」必须有 1–100 个步骤。");
-            foreach (var step in preset.Steps)
-                CommandMacroRunner.Encode(step);
-        }
-        return true;
+        // Invalid WPF bindings (e.g. DelayMs = "abc") keep the old model value.
+        // Never send or save that stale value while the editor still shows an error.
+        if (!_steps.CommitEdit(DataGridEditingUnit.Cell, true) ||
+            !_steps.CommitEdit(DataGridEditingUnit.Row, true))
+            throw new FormatException("当前步骤编辑无效，请修正单元格后重试。");
     }
+
+    private static void ValidatePreset(CommandPreset preset)
+    {
+        if (string.IsNullOrWhiteSpace(preset.Name) || preset.Name.Length > 80)
+            throw new FormatException("预设名称必须为 1–80 个字符。");
+        if (preset.Steps is null || preset.Steps.Count is < 1 or > 100)
+            throw new FormatException($"「{preset.Name}」必须有 1–100 个步骤。");
+        foreach (var step in preset.Steps)
+            CommandMacroRunner.Encode(step);
+    }
+
+    private static List<CommandPreset> SnapshotPresets(IEnumerable<CommandPreset> presets) =>
+        JsonSerializer.Deserialize<List<CommandPreset>>(JsonSerializer.Serialize(presets))!;
 
     private void Save()
     {
         try
         {
-            ValidateAndCommit();
-            // Use the existing atomic settings store; don't create a second config file.
-            AppServices.Settings.CommandPresets = _presets.ToList();
+            CommitPendingEdit();
+            foreach (var preset in _presets) ValidatePreset(preset);
+            // Global settings must not alias editable presets or their Steps.
+            // This ensures subsequent unsaved edits are discarded on close.
+            AppServices.Settings.CommandPresets = SnapshotPresets(_presets);
             AppServices.SaveSettings();
             _message.Text = "预设已保存。";
         }
@@ -245,7 +253,9 @@ public sealed class CommandPaletteWindow : Window
         if (_running || _list.SelectedItem is not CommandPreset preset) return;
         try
         {
-            ValidateAndCommit();
+            CommitPendingEdit();
+            // A draft in a different preset must not block this valid command.
+            ValidatePreset(preset);
             var status = _runtime.GetStatus();
             if (status.State != MappingState.Running || status.SerialState != SerialState.Open)
                 throw new IOException("目标串口当前未连接，已取消发送。");
@@ -254,20 +264,44 @@ public sealed class CommandPaletteWindow : Window
                 MessageBox.Show($"向 { _runtime.Config.Name } ({ _runtime.Config.PortName }) 发送「{snapshot.Name}」？\n共 {snapshot.Steps.Count} 步。",
                     "确认目标设备", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                 return;
-            _runCancellation = new CancellationTokenSource();
-            _running = true;
-            _run.IsEnabled = false;
-            _cancel.IsEnabled = true;
-            _steps.IsReadOnly = true;
-            _list.IsEnabled = false;
-            _message.Text = "执行中…";
-            await CommandMacroRunner.RunAsync(snapshot, bytes =>
+            using var cancellation = new CancellationTokenSource();
+            _runCancellation = cancellation;
+            // Once the device disconnects, permanently abort this macro. Even if
+            // auto-reconnect completes during a step delay, do not send any more.
+            void OnRuntimeStatusChanged(MappingRuntime runtime)
             {
-                var current = _runtime.GetStatus();
-                return current.State == MappingState.Running &&
-                    current.SerialState == SerialState.Open && _runtime.WriteLocal(bytes);
-            }, _runCancellation.Token);
-            _message.Text = "全部步骤已进入串口发送队列。";
+                var state = runtime.GetStatus();
+                if (state.State != MappingState.Running || state.SerialState != SerialState.Open)
+                {
+                    try { cancellation.Cancel(); }
+                    catch (ObjectDisposedException) { /* execution already ended */ }
+                }
+            }
+            _runtime.StatusChanged += OnRuntimeStatusChanged;
+            try
+            {
+                // Close the gap between the initial check, confirmation and subscription.
+                OnRuntimeStatusChanged(_runtime);
+                cancellation.Token.ThrowIfCancellationRequested();
+                _running = true;
+                _run.IsEnabled = false;
+                _cancel.IsEnabled = true;
+                _steps.IsReadOnly = true;
+                _list.IsEnabled = false;
+                _message.Text = "执行中…";
+                await CommandMacroRunner.RunAsync(snapshot, bytes =>
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    var current = _runtime.GetStatus();
+                    return current.State == MappingState.Running &&
+                        current.SerialState == SerialState.Open && _runtime.WriteLocal(bytes);
+                }, cancellation.Token);
+                _message.Text = "全部步骤已进入串口发送队列。";
+            }
+            finally
+            {
+                _runtime.StatusChanged -= OnRuntimeStatusChanged;
+            }
         }
         catch (OperationCanceledException) { _message.Text = "宏已取消。"; }
         catch (Exception ex) { _message.Text = "执行中止：" + ex.Message; }
@@ -278,7 +312,6 @@ public sealed class CommandPaletteWindow : Window
             _cancel.IsEnabled = false;
             _steps.IsReadOnly = false;
             _list.IsEnabled = true;
-            _runCancellation?.Dispose();
             _runCancellation = null;
         }
     }
