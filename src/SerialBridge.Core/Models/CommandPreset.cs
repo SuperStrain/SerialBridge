@@ -3,10 +3,21 @@ using System.Text;
 namespace SerialBridge.Core.Models;
 
 /// <summary>Saved command; a single step is a shortcut, multiple steps form a macro.</summary>
-public sealed class CommandPreset
+public sealed class CommandPreset : System.ComponentModel.INotifyPropertyChanged
 {
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+    private string _name = "新命令";
     public Guid Id { get; set; } = Guid.NewGuid();
-    public string Name { get; set; } = "新命令";
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            if (_name == value) return;
+            _name = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Name)));
+        }
+    }
     public bool ConfirmBeforeRun { get; set; } = true;
     public List<CommandStep> Steps { get; set; } = new() { new() };
 }
