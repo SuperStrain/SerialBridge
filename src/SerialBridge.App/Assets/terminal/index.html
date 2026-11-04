@@ -155,16 +155,39 @@
   // xterm.js 自身会在用户查看 scrollback 时保持 viewport。
   // 不得在写入新日志后强制 scrollToBottom，否则滚轮上翻会被打断。
   const jumpBottom = document.getElementById('jumpBottom');
+  const viewport = term.element.querySelector('.xterm-viewport');
   const atBottom = () => term.buffer.active.viewportY >= term.buffer.active.baseY;
   const updateScrollState = () => {
-    jumpBottom.classList.toggle('visible', !atBottom());
+    // The native scrollbar can move without fresh UART output; use both the
+    // xterm buffer position and its DOM viewport while a drag is in progress.
+    const domAboveBottom = viewport &&
+      viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 2;
+    jumpBottom.classList.toggle('visible', !atBottom() || !!domAboveBottom);
   };
-  term.onScroll(updateScrollState);
+  let scrollUpdatePending = false;
+  const scheduleScrollStateUpdate = () => {
+    if (scrollUpdatePending) return;
+    scrollUpdatePending = true;
+    requestAnimationFrame(() => {
+      scrollUpdatePending = false;
+      updateScrollState();
+    });
+  };
+  term.onScroll(scheduleScrollStateUpdate);
+  // Native scrollbar drag/track clicks aren't guaranteed to trigger xterm's
+  // scroll callback before the next terminal write. Listen to the viewport
+  // directly so "回到底部" also appears when the device is completely idle.
+  viewport?.addEventListener('scroll', scheduleScrollStateUpdate, { passive: true });
+  viewport?.addEventListener('pointerup', scheduleScrollStateUpdate);
+  viewport?.addEventListener('keyup', scheduleScrollStateUpdate);
+  term.element.addEventListener('wheel', scheduleScrollStateUpdate, { passive: true });
   jumpBottom.addEventListener('click', () => {
     term.scrollToBottom();
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
     term.focus();
-    updateScrollState();
+    scheduleScrollStateUpdate();
   });
+  scheduleScrollStateUpdate();
 
   // 搜索只查看 xterm 当前保留的 scrollback，不向物理串口发送字符。
   // 只用终端自带 buffer 和 select API，避免额外网络依赖。
