@@ -61,6 +61,14 @@ jobs:
           dotnet-version: 8.0.x
       - name: Build and run unit tests
         run: dotnet test SerialBridge.sln -c Debug --nologo
+      - name: Stress blocked-writer shutdown regression
+        shell: pwsh
+        run: |
+          1..3 | ForEach-Object {
+            Write-Host "Blocked-writer shutdown regression run $_ / 3"
+            dotnet test tests/SerialBridge.Core.Tests/SerialBridge.Core.Tests.csproj -c Debug --no-build --nologo --filter "FullyQualifiedName~StopTimeout_RefusesRestartUntilPreviousWriterFinishes"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
   package:
     needs: [release-check, test]

@@ -169,9 +169,14 @@ public sealed class MappingRuntime : IAsyncDisposable
             _serialWriteQueue?.Writer.TryComplete();
             _serialWriteQueue = null;
 
-            // Close producers first. Closing the serial session also releases an in-flight physical Write.
+            // Keep the existing shutdown order and writer safety barrier. Record
+            // phase timings so CI failures can distinguish serial-session shutdown
+            // from a truly blocked physical write.
+            var stopWatch = System.Diagnostics.Stopwatch.StartNew();
             await _tcp.StopAsync().ConfigureAwait(false);
+            var tcpStopMs = stopWatch.ElapsedMilliseconds;
             await _serial.StopAsync().ConfigureAwait(false);
+            var serialStopMs = stopWatch.ElapsedMilliseconds - tcpStopMs;
             Capture?.Dispose();
             Capture = null;
             if (_serialWriterTask is not null)
@@ -179,6 +184,8 @@ public sealed class MappingRuntime : IAsyncDisposable
                 try { await _serialWriterTask.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false); }
                 catch (TimeoutException)
                 {
+                    LogX.Warn($"映射「{Config.Name}」停止超时：TCP={tcpStopMs}ms，串口会话={serialStopMs}ms，" +
+                        $"写任务已等待约 {stopWatch.ElapsedMilliseconds - tcpStopMs - serialStopMs}ms，总计={stopWatch.ElapsedMilliseconds}ms。");
                     _state = MappingState.Faulted;
                     _faultMessage = "串口写入未能停止，设备释放前禁止重新启动。";
                     StatusChanged?.Invoke(this);
@@ -186,6 +193,9 @@ public sealed class MappingRuntime : IAsyncDisposable
                 }
                 _serialWriterTask = null;
             }
+            if (stopWatch.ElapsedMilliseconds >= 1000)
+                LogX.Info($"映射「{Config.Name}」停止耗时：TCP={tcpStopMs}ms，串口会话={serialStopMs}ms，" +
+                    $"总计={stopWatch.ElapsedMilliseconds}ms。");
             _writerCts?.Dispose();
             _writerCts = null;
             _state = MappingState.Stopped;
