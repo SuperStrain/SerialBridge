@@ -515,7 +515,25 @@ public sealed class BridgeTests : IAsyncLifetime
         {
             Assert.True(rt.WriteLocal([0x11]));
             await WaitUntil(() => first.WriteStarted.IsSet);
-            await rt.StopAsync().WaitAsync(TimeSpan.FromSeconds(8));
+            // Internal shutdown contains two separate 3-second waits: the
+            // serial session and the stuck physical writer. The outer watchdog
+            // must allow for both plus busy Windows CI runner scheduling.
+            // This remains bounded, and all Faulted/restart-safety assertions
+            // below remain mandatory.
+            var stopWatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                await rt.StopAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch (TimeoutException)
+            {
+                _output.WriteLine($"StopAsync exceeded 15s; elapsed={stopWatch.Elapsed}, " +
+                    $"mapping={rt.State}, serial={rt.Serial.State}, " +
+                    $"writeStarted={first.WriteStarted.IsSet}, writeGate={writeGate.IsSet}");
+                throw;
+            }
+            _output.WriteLine($"Blocked-writer shutdown took {stopWatch.Elapsed}; " +
+                $"mapping={rt.State}, serial={rt.Serial.State}");
 
             Assert.Equal(MappingState.Faulted, rt.State);
             await rt.StartAsync();
