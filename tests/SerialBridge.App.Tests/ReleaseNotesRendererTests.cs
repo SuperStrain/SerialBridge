@@ -39,8 +39,12 @@ public sealed class ReleaseNotesRendererTests
         var doc = ReleaseNotesRenderer.ToFlowDocument("修复 **崩溃** 问题");
         var paragraph = (Paragraph)doc.Blocks.FirstBlock!;
 
-        Assert.Contains(paragraph.Inlines, i =>
-            i is Bold b && InlineText(b) == "崩溃");
+        var boldContainer = Assert.IsType<Bold>(paragraph.Inlines.First(i =>
+            i is Bold b && InlineText(b) == "崩溃"));
+        // 审查发现的行为回归:子 Run 不得用外层 Normal 覆盖 Bold 容器的字重
+        var run = Assert.IsType<Run>(boldContainer.Inlines.FirstInline);
+        Assert.Equal(System.Windows.FontWeights.Bold, run.FontWeight);
+
         Assert.Equal("修复 崩溃 问题", string.Concat(paragraph.Inlines.Select(InlineText)));
         Assert.DoesNotContain("**", string.Concat(paragraph.Inlines.Select(InlineText)));
     }

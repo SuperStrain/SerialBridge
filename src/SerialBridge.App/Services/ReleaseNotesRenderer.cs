@@ -230,12 +230,31 @@ public static class ReleaseNotesRenderer
                 target.Add(codeRun);
                 break;
             case EmphasisInline emphasis:
-                // 强调 = 语义容器:子内联自动继承加粗/斜体/删除线样式
-                System.Windows.Documents.Span emphasisContainer = emphasis.DelimiterChar is '*' or '_'
-                    ? (emphasis.DelimiterCount >= 2 ? new Bold() : new Italic())
-                    : new Span { TextDecorations = System.Windows.TextDecorations.Strikethrough };
+                // 强调 = 语义容器;子内联必须继承强调后的字重/字形,
+                // 否则 FormatRun 会用外层 Normal 覆盖 Bold 容器的继承效果。
+                System.Windows.Documents.Inline emphasisContainer;
+                FontWeight childWeight;
+                FontStyle? childStyle;
+                if (emphasis.DelimiterChar is '*' or '_' && emphasis.DelimiterCount >= 2)
+                {
+                    emphasisContainer = new Bold();
+                    childWeight = FontWeights.Bold;
+                    childStyle = style;
+                }
+                else if (emphasis.DelimiterChar is '*' or '_')
+                {
+                    emphasisContainer = new Italic();
+                    childWeight = weight;
+                    childStyle = FontStyles.Italic;
+                }
+                else
+                {
+                    emphasisContainer = new Span { TextDecorations = System.Windows.TextDecorations.Strikethrough };
+                    childWeight = weight;
+                    childStyle = style;
+                }
                 target.Add(emphasisContainer);
-                AddInline(emphasisContainer.Inlines, emphasis, weight, style, size);
+                AddInline(((System.Windows.Documents.Span)emphasisContainer).Inlines, emphasis, childWeight, childStyle, size);
                 break;
             case LinkInline link when link.IsImage:
                 var alt = link.FirstChild is LiteralInline li ? li.Content.ToString() : "[图片]";
