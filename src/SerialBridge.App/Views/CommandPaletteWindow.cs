@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,6 +14,9 @@ namespace SerialBridge.App.Views;
 /// <summary>Editable command shortcuts and macros for exactly one terminal mapping.</summary>
 public sealed class CommandPaletteWindow : Window
 {
+    /// <summary>预设保存成功后触发；监听方（如终端命令栏）刷新显示。</summary>
+    internal static event Action? PresetsSaved;
+
     private readonly MappingRuntime _runtime;
     private readonly ObservableCollection<CommandPreset> _presets;
     private readonly ListBox _list = new() { MinWidth = 160, DisplayMemberPath = "Name" };
@@ -26,6 +28,7 @@ public sealed class CommandPaletteWindow : Window
         CanUserDeleteRows = false, HeadersVisibility = DataGridHeadersVisibility.Column,
         MinHeight = 220, Height = 290, SelectionMode = DataGridSelectionMode.Single
     };
+    private DataGridComboBoxColumn? _formatColumn;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap };
     private readonly Button _run = new() { Content = "发送 / 运行宏" };
     private readonly Button _cancel = new() { Content = "取消执行", IsEnabled = false };
@@ -80,7 +83,7 @@ public sealed class CommandPaletteWindow : Window
 
         var info = new TextBlock
         {
-            Text = "快捷命令 = 1 个步骤；宏 = 多个步骤。Text 默认 UTF-8；HEX 使用 01 03 FF 格式。每个步骤发送后可延时。仅向当前映射发送，不执行本机命令。",
+            Text = "快捷命令 = 1 个步骤；宏 = 多个步骤。Text 默认 UTF-8；HEX 使用 01 03 FF 格式（换行自动为 None）。每个步骤发送后可延时。仅向当前映射发送，不执行本机命令。",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12)
         };
         DockPanel.SetDock(info, Dock.Top);
@@ -136,6 +139,7 @@ public sealed class CommandPaletteWindow : Window
             ItemsSource = new[] { "Text", "Hex" },
             SelectedItemBinding = new Binding(nameof(CommandStep.Format)) { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged }
         });
+        _formatColumn = (DataGridComboBoxColumn)_steps.Columns[^1];
         _steps.Columns.Add(new DataGridComboBoxColumn
         {
             Header = "换行", Width = new DataGridLength(75),
@@ -150,11 +154,28 @@ public sealed class CommandPaletteWindow : Window
         right.Children.Add(_steps);
         right.Children.Add(new TextBlock
         {
-            Text = "发送 HEX 时请将换行设置为 None；单步最多 4096 字节，最多 100 步，单步延时 0–60000ms。宏顺序发送；有其他 TCP 客户端写入时仍可能交错。",
+            Text = "换行 CR = 回车键（串口控制台标准）；LF/CRLF 仅特殊设备需要。切换为 Hex 时换行自动置为 None。单步最多 4096 字节，最多 100 步，单步延时 0–60000ms。宏顺序发送；有其他 TCP 客户端写入时仍可能交错。",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0),
             Foreground = Brushes.DimGray
         });
+        // Hex 步骤不允许换行、Text 步骤通常要回车：随格式自动纠正，避免发送时报错。
+        _steps.CellEditEnding += OnStepCellEditEnding;
     }
+
+    private void OnStepCellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
+    {
+        if (e.EditAction != DataGridEditAction.Commit || e.Column != _formatColumn ||
+            _running || e.Row.Item is not CommandStep step) return;
+        // 格式列绑定带 PropertyChanged 触发器，提交时模型已是新值。
+        var format = NormalizeFormat(step.Format);
+        if (step.Format != format) step.Format = format;
+        step.Ending = format == "Hex" ? "None" : step.Ending == "None" ? "CR" : step.Ending;
+        // CommandStep 带 INPC：直接赋值即可刷新同行换行 ComboBox 的显示。
+        // 不能在此调用 Items.Refresh —— 编辑事务尚未结束会抛 InvalidOperationException。
+    }
+
+    private static string NormalizeFormat(string? format) =>
+        string.Equals(format?.Trim(), "Hex", StringComparison.OrdinalIgnoreCase) ? "Hex" : "Text";
 
     private void SelectPreset()
     {
@@ -244,6 +265,7 @@ public sealed class CommandPaletteWindow : Window
             AppServices.Settings.CommandPresets = SnapshotPresets(_presets);
             AppServices.SaveSettings();
             _message.Text = "预设已保存。";
+            PresetsSaved?.Invoke();
         }
         catch (Exception ex) { _message.Text = "保存失败：" + ex.Message; }
     }
@@ -256,9 +278,7 @@ public sealed class CommandPaletteWindow : Window
             CommitPendingEdit();
             // A draft in a different preset must not block this valid command.
             ValidatePreset(preset);
-            var status = _runtime.GetStatus();
-            if (status.State != MappingState.Running || status.SerialState != SerialState.Open)
-                throw new IOException("目标串口当前未连接，已取消发送。");
+            CommandPresetSender.ThrowIfNotConnected(_runtime);
             var snapshot = JsonSerializer.Deserialize<CommandPreset>(JsonSerializer.Serialize(preset))!;
             if (snapshot.ConfirmBeforeRun &&
                 MessageBox.Show($"向 { _runtime.Config.Name } ({ _runtime.Config.PortName }) 发送「{snapshot.Name}」？\n共 {snapshot.Steps.Count} 步。",
@@ -266,42 +286,16 @@ public sealed class CommandPaletteWindow : Window
                 return;
             using var cancellation = new CancellationTokenSource();
             _runCancellation = cancellation;
-            // Once the device disconnects, permanently abort this macro. Even if
-            // auto-reconnect completes during a step delay, do not send any more.
-            void OnRuntimeStatusChanged(MappingRuntime runtime)
-            {
-                var state = runtime.GetStatus();
-                if (state.State != MappingState.Running || state.SerialState != SerialState.Open)
-                {
-                    try { cancellation.Cancel(); }
-                    catch (ObjectDisposedException) { /* execution already ended */ }
-                }
-            }
-            _runtime.StatusChanged += OnRuntimeStatusChanged;
-            try
-            {
-                // Close the gap between the initial check, confirmation and subscription.
-                OnRuntimeStatusChanged(_runtime);
-                cancellation.Token.ThrowIfCancellationRequested();
-                _running = true;
-                _run.IsEnabled = false;
-                _cancel.IsEnabled = true;
-                _steps.IsReadOnly = true;
-                _list.IsEnabled = false;
-                _message.Text = "执行中…";
-                await CommandMacroRunner.RunAsync(snapshot, bytes =>
-                {
-                    cancellation.Token.ThrowIfCancellationRequested();
-                    var current = _runtime.GetStatus();
-                    return current.State == MappingState.Running &&
-                        current.SerialState == SerialState.Open && _runtime.WriteLocal(bytes);
-                }, cancellation.Token);
-                _message.Text = "全部步骤已进入串口发送队列。";
-            }
-            finally
-            {
-                _runtime.StatusChanged -= OnRuntimeStatusChanged;
-            }
+            _running = true;
+            _run.IsEnabled = false;
+            _cancel.IsEnabled = true;
+            _steps.IsReadOnly = true;
+            _list.IsEnabled = false;
+            _message.Text = "执行中…";
+            // Aborts permanently once the mapping stops or the serial port drops;
+            // even auto-reconnect during a step delay does not resume the macro.
+            await CommandPresetSender.SendAsync(_runtime, snapshot, cancellation.Token);
+            _message.Text = "全部步骤已进入串口发送队列。";
         }
         catch (OperationCanceledException) { _message.Text = "宏已取消。"; }
         catch (Exception ex) { _message.Text = "执行中止：" + ex.Message; }

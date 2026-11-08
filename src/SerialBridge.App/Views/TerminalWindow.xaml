@@ -65,6 +65,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- 自绘深色标题栏：拖动区 + 窗口控制按钮 -->
@@ -101,8 +102,8 @@
                         <Run Text="↑ " /><Run Text="{Binding TxText, Mode=OneWay}" />
                         <Run Text="  ↓ " /><Run Text="{Binding RxText, Mode=OneWay}" />
                     </TextBlock>
-                    <ui:Button Content="快捷命令 / 宏" Click="OnCommandsClick" Margin="0,0,8,0"
-                               ToolTip="保存常用串口命令、HEX 数据或分步宏" />
+                    <ui:Button x:Name="ToggleCommandBarButton" Content="快捷命令 / 宏" Click="OnCommandsClick" Margin="0,0,8,0"
+                               ToolTip="显示/隐藏底部快捷命令栏（编辑请点击栏内「编辑」）" />
                     <ui:Button Content="搜索" Click="OnFindText" Margin="0,0,8,0"
                                ToolTip="搜索终端历史输出（Ctrl+F）" />
                     <ui:Button Content="清屏" Click="OnClearScreen"
@@ -127,7 +128,32 @@
                           DefaultBackgroundColor="#1E1E2E" />
         </Grid>
 
-        <Border Grid.Row="3" Background="#181825" Padding="14,6">
+        <!-- 快捷命令栏（Xshell 式常驻按钮条，点击直接发送；显隐由工具栏按钮切换并持久化） -->
+        <Border x:Name="CommandBarHost" Grid.Row="3" Background="#181825"
+                BorderThickness="0,1,0,0" BorderBrush="#313244" Padding="10,5">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Disabled"
+                              HorizontalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="CommandBarButtons" Orientation="Horizontal" />
+                </ScrollViewer>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="CommandBarStatus" FontSize="11.5" Foreground="#9399B2"
+                               VerticalAlignment="Center" MaxWidth="280"
+                               TextTrimming="CharacterEllipsis" Margin="12,0,10,0" />
+                    <ui:Button x:Name="CommandBarStop" Content="停止" Margin="0,0,8,0"
+                               Click="OnCommandBarStopClick" Visibility="Collapsed"
+                               ToolTip="中止正在执行的宏（已发送的步骤无法撤回）" />
+                    <ui:Button Content="编辑" Click="OnCommandBarEditClick"
+                               ToolTip="编辑快捷命令与宏" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="4" Background="#181825" Padding="14,6">
             <TextBlock FontSize="11.5" Foreground="#9399B2" TextWrapping="Wrap"
                        Text="逐键透传模式：所有按键（含 Tab/Ctrl+C/方向键）直接发送到设备，回显由设备决定——与 Xshell 串口一致。查找：Ctrl+F / F3；上翻暂停自动跟随，点击“回到底部”恢复；字体：Ctrl + + / -，Ctrl+0 恢复，Ctrl+滚轮缩放；复制：Ctrl+Shift+C；粘贴：Ctrl+Shift+V" />
         </Border>
