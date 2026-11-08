@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Decide whether the scheduled SerialBridge release is eligible."""
+"""Decide version and eligibility for scheduled or explicitly requested releases."""
 import datetime as dt
 import json
 import os
 import re
 import subprocess
+import argparse
 import sys
 import urllib.error
 import urllib.request
@@ -43,7 +44,7 @@ def version_tuple(value):
     return tuple(map(int, match.groups()))
 
 
-def main():
+def main(manual=False):
     write_output(eligible="false")
     releases = []
     for page in range(1, 11):
@@ -61,7 +62,7 @@ def main():
     last = version_tuple(tag)
     published = dt.datetime.fromisoformat(release["published_at"].replace("Z", "+00:00"))
     age = NOW - published
-    if age < dt.timedelta(days=4):
+    if not manual and age < dt.timedelta(days=4):
         print(f"Skip: {tag} released {age.days} days ago (<4 days).")
         return
 
@@ -71,7 +72,7 @@ def main():
 
     changed = git("diff", "--name-only", tag, "HEAD").splitlines()
     relevant = [p for p in changed if p.startswith(RELEVANT)]
-    if not relevant:
+    if not manual and not relevant:
         print(f"Skip: no releasable changes since {tag}.")
         return
 
@@ -80,13 +81,18 @@ def main():
     candidate = (last[0], last[1], last[2] + 1)
     next_version = max(candidate, current)
     version = ".".join(map(str, next_version))
-    print(f"Eligible: {len(relevant)} relevant changed files since {tag}; next version v{version}.")
+    reason = "explicit manual release (schedule gates bypassed)" if manual else f"{len(relevant)} relevant changed files since {tag}"
+    print(f"Eligible: {reason}; next version v{version}.")
     write_output(eligible="true", version=version, source_sha=git("rev-parse", "HEAD"))
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manual", action="store_true",
+                        help="Explicit release: bypass the 4-day window and changed-file gate")
+    args = parser.parse_args()
     try:
-        main()
+        main(manual=args.manual)
     except (ValueError, RuntimeError, urllib.error.HTTPError, subprocess.CalledProcessError) as exc:
         print(f"Release eligibility check failed: {exc}", file=sys.stderr)
         sys.exit(1)
