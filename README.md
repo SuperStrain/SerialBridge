@@ -3,9 +3,9 @@
 
   # SerialBridge
 
-  **让串口调试跨越设备与网络。**
+  **让局域网内的 AI Agent 直接访问设备串口。**
 
-  轻量、直观的 Windows 串口 ↔ TCP 桥接工具：多路映射、透明双向传输、内置终端与快捷命令。
+  将 Windows 上的物理串口转换为局域网内可访问的 TCP 端点，让 AI Agent、开发者和自动化脚本直接与开发板及 MCU 通信，加速设备调试与验证。
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
@@ -22,10 +22,10 @@
 
 ## ✨ 为什么选择 SerialBridge？
 
-无需在远程电脑上寻找物理串口。将 USB 转串口设备接在运行 SerialBridge 的 Windows 主机上，其他设备便可通过普通 TCP 连接访问它。特别适合 **嵌入式 Linux 开发、MCU 调试、串口日志采集和局域网远程维护**。
+**项目的核心目标，是打通 AI Agent 与真实硬件之间的串口通道。** 将 USB 转串口设备连接到运行 SerialBridge 的 Windows 主机，同一局域网内的 AI Agent 即可通过 TCP 读取启动日志、发送调试命令、获取设备反馈，并根据结果继续分析或执行下一步操作。开发者不必在 AI 与串口终端之间反复复制粘贴，大幅减少设备调试、问题定位和回归验证的人工操作。\n\nSerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供的是透明串口通道，而不是内置 AI 模型或无需授权的自动控制系统**。
 
 ```text
-   Linux / macOS / Windows / 调试脚本
+   AI Agent / 调试脚本 / 开发者终端
                   │
              TCP 客户端
                   │  192.168.1.100:9001
@@ -46,7 +46,7 @@
 
 | 功能 | 说明 |
 | --- | --- |
-| 🔌 **多路串口映射** | 一条映射对应一个 COM 端口和 TCP 监听地址；独立启动、停止和配置 |
+| 🤖 **AI Agent 访问设备** | 同一局域网内的 Agent 可通过 TCP 与设备串口交互；支持配套 Agent Skill / Python 脚本 |\n| 🔌 **多路串口映射** | 一条映射对应一个 COM 端口和 TCP 监听地址；独立启动、停止和配置 |
 | 🔄 **双向透明传输** | 支持任意二进制字节、单/多客户端模式、串口写入顺序化 |
 | 🛡️ **断线恢复** | 串口拔插后可自动重连；端口占用检测、慢客户端保护、写入队列背压 |
 | 💻 **内置串口终端** | WebView2 + xterm.js，逐键透传、文本搜索、滚动历史、字体缩放 |
@@ -57,7 +57,7 @@
 
 > 宏是**固定延时的顺序发送**，不自动等待设备 Shell 提示符或命令执行完成。详见 [快捷命令与宏说明](docs/快捷命令与宏.md)。
 
-## 📥 安装
+## 🤖 用 AI Agent 调试真实设备\n\n例如，AI Agent 在 Linux 开发机上运行，而开发板的 USB 串口连接在另一台 Windows 电脑上：\n\n1. 在 Windows 上启动 SerialBridge，将开发板的 `COM3` 映射到 TCP 端口 `9001`。\n2. 在同一可信局域网内，让 Agent 使用普通 TCP 客户端，或使用仓库提供的 [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) 与 [Python 脚本](skills/serial-tcp-uart/scripts/serial_session.py) 连接。\n3. Agent 可以读取日志、发送经授权的诊断命令、等待设备提示符，并结合返回结果辅助定位问题；人工仍可通过内置终端接管调试。\n\n```bash\n# 在 Agent 所在的 Linux 主机上，按实际主机 IP 修改地址\npython3 skills/serial-tcp-uart/scripts/serial_session.py \\\n  --host 192.168.1.100 --port 9001 exec "uname -a"\n```\n\n> **边界说明：** SerialBridge 本身不推理、不执行 Agent 工作流；自动化逻辑由外部 Agent/脚本负责。串口是否需要登录、提示符如何匹配以及命令权限，都取决于目标设备和 Agent 配置。固件刷写、重启等改变设备状态的操作应先获得明确授权。\n\n## 📥 安装
 
 前往 [**GitHub Releases**](https://github.com/SuperStrain/SerialBridge/releases/latest)，选择适合你的版本：
 
