@@ -3,9 +3,9 @@
 
   # SerialBridge
 
-  **Your serial ports, available across the network.**
+  **Give AI agents on your LAN direct access to real device serial ports.**
 
-  A lightweight Windows serial ↔ TCP bridge with independent mappings, transparent bidirectional forwarding, a built-in terminal, and one-click commands.
+  Expose physical serial ports on a Windows host as TCP endpoints so LAN-connected AI agents, developers, and automation scripts can interact with development boards and MCUs—accelerating debugging and validation.
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
@@ -22,10 +22,10 @@
 
 ## ✨ Why SerialBridge?
 
-Stop requiring every machine to have direct access to a USB-to-serial adapter. Connect the adapter to a Windows computer running SerialBridge, then reach the physical serial device using a regular TCP connection. Useful for **embedded Linux development, MCU debugging, serial log collection, and remote maintenance on a LAN**.
+**The primary goal is to connect AI agents to real hardware over serial.** Plug your USB-to-serial adapter into a Windows computer running SerialBridge. AI agents on the same LAN can then connect over TCP to read boot logs, send diagnostic commands, collect device responses, and use those responses to guide further investigation. This reduces manual copy-and-paste between an AI assistant and a serial terminal, speeding up embedded debugging and regression testing.\n\nRegular TCP clients and human-operated terminals work too. **SerialBridge is a transparent transport, not a built-in AI model or an autonomous device controller.**
 
 ```text
-     Linux / macOS / Windows / scripts
+       AI agents / scripts / terminals
                    │
               TCP client
                    │  192.168.1.100:9001
@@ -46,7 +46,7 @@ Stop requiring every machine to have direct access to a USB-to-serial adapter. C
 
 | Feature | What it does |
 | --- | --- |
-| 🔌 **Independent mappings** | Map each COM port to its own TCP listening endpoint; start and stop mappings individually |
+| 🤖 **AI agent access** | Agents on the same LAN can interact with device serial ports over TCP using the included Agent Skill or Python script |\n| 🔌 **Independent mappings** | Map each COM port to its own TCP listening endpoint; start and stop mappings individually |
 | 🔄 **Bidirectional raw transfer** | Forward arbitrary binary data with single- or multi-client modes and serialized serial writes |
 | 🛡️ **Connection recovery** | Configurable serial reconnection, occupied-port detection, slow-client protection, and bounded queues |
 | 💻 **Built-in terminal** | WebView2 + xterm.js with direct keystroke forwarding, search, scrollback, and font zoom |
@@ -57,7 +57,7 @@ Stop requiring every machine to have direct access to a USB-to-serial adapter. C
 
 > Macros send steps sequentially with **fixed delays**; they do **not** wait for a remote shell prompt or command completion. See [Quick commands & macros](docs/快捷命令与宏.md) (Chinese).
 
-## 📥 Install
+## 🤖 Debug real hardware with AI agents\n\nFor example, your AI agent runs on a Linux workstation while the development board's USB serial adapter is attached to a separate Windows PC:\n\n1. On Windows, configure SerialBridge to map the board's `COM3` to TCP port `9001`.\n2. From the same trusted LAN, use a raw TCP client or the included [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) and [Python script](skills/serial-tcp-uart/scripts/serial_session.py).\n3. The agent can collect logs, send authorized diagnostic commands, wait for device prompts, and analyze responses. Developers can also use the built-in terminal for hands-on control.\n\n```bash\n# Run on the agent's Linux host; replace with your Windows host's LAN IP\npython3 skills/serial-tcp-uart/scripts/serial_session.py \\\n  --host 192.168.1.100 --port 9001 exec "uname -a"\n```\n\n> **Scope:** SerialBridge does not run an AI model or agent workflow. Automation belongs to the external agent/script. Login handling, prompt matching, and privileges depend on the target device and agent setup. State-changing operations such as flashing firmware or rebooting a device should require explicit authorization.\n\n## 📥 Install
 
 Visit [**GitHub Releases**](https://github.com/SuperStrain/SerialBridge/releases/latest) and download either:
 
