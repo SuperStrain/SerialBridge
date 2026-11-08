@@ -56,6 +56,15 @@ public partial class MainWindow : FluentWindow
         // 最小化：保留任务栏图标（普通最小化行为），不再隐藏进托盘
     }
 
+    // ---------- 更新弹窗 ----------
+
+    private void OnUpdateBadgeClick(object sender, MouseButtonEventArgs e)
+    {
+        var update = _viewModel.Update;
+        if (update is null) return;
+        new UpdatePopupWindow(update) { Owner = this }.ShowDialog();
+    }
+
     private async void OnWindowClosing(object? sender, CancelEventArgs e)
     {
         var app = (App)Application.Current;

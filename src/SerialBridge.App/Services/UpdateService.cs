@@ -9,7 +9,8 @@ using SerialBridge.Core.Update;
 namespace SerialBridge.App.Services;
 
 /// <summary>新版本信息。</summary>
-public sealed record UpdateInfo(string Version, string DownloadUrl, string ReleasePageUrl, bool IsPortableAssetOnly);
+public sealed record UpdateInfo(string Version, string DownloadUrl, string ReleasePageUrl, bool IsPortableAssetOnly,
+    string? ReleaseNotes = null);
 
 /// <summary>下载进度。</summary>
 public sealed record DownloadProgress(long ReceivedBytes, long? TotalBytes)
@@ -137,7 +138,10 @@ public sealed class UpdateService : IDisposable
 
             JsonElement? assets = release.TryGetProperty("assets", out var a) &&
                 a.ValueKind == JsonValueKind.Array ? a : null;
-            return UpdateCheckResult.Available(BuildInfoFromAssets(tag, assets));
+            // Release 正文（Markdown 源文本）用于更新弹窗展示；缺失时由 UI 显示兜底文案。
+            string? releaseBody = release.TryGetProperty("body", out var b) &&
+                b.ValueKind == JsonValueKind.String ? b.GetString() : null;
+            return UpdateCheckResult.Available(BuildInfoFromAssets(tag, assets, releaseBody));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -151,7 +155,7 @@ public sealed class UpdateService : IDisposable
     }
 
     /// <summary>从 Release 的 assets 里找 Setup 安装包，构造 UpdateInfo。</summary>
-    private UpdateInfo BuildInfoFromAssets(string tag, JsonElement? assets)
+    private UpdateInfo BuildInfoFromAssets(string tag, JsonElement? assets, string? releaseBody)
     {
         var version = tag.TrimStart('v', 'V');
         var setupAsset = "SerialBridge-Setup-" + version + "-x64.exe";
@@ -176,7 +180,8 @@ public sealed class UpdateService : IDisposable
         return new UpdateInfo(version,
             downloadUrl ?? ReleasesPageUrl,
             ReleasesPageUrl,
-            IsPortableAssetOnly: !autoUpgradable);
+            IsPortableAssetOnly: !autoUpgradable,
+            ReleaseNotes: string.IsNullOrWhiteSpace(releaseBody) ? null : releaseBody);
     }
 
     /// <summary>

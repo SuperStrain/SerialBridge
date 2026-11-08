@@ -6,16 +6,25 @@ using SerialBridge.Core.Logging;
 
 namespace SerialBridge.App.ViewModels;
 
-/// <summary>自动升级状态机：检查 → 提示 → 下载（进度）→ 安装接力。</summary>
+/// <summary>自动升级状态机：检查 → NEW 徽章 → 弹窗 → 下载（进度）→ 安装接力。</summary>
 public partial class UpdateViewModel : ObservableObject
 {
     private readonly UpdateService _updater;
     private string? _skippedVersion;
 
-    [ObservableProperty] private bool _updateBannerVisible;
-    [ObservableProperty] private string _updateBannerTitle = "";
-    [ObservableProperty] private string _updateBannerMessage = "";
-    [ObservableProperty] private bool _updateActionVisible;   // 立即升级/跳过按钮（下载中隐藏）
+    /// <summary>检测到新版本且未被跳过时，主界面标题旁常驻绿色 NEW 徽章。</summary>
+    [ObservableProperty] private bool _updateBadgeVisible;
+    /// <summary>NEW 徽章的悬停提示。</summary>
+    [ObservableProperty] private string _updateBadgeVersion = "";
+    /// <summary>更新弹窗标题（新版本 vX.Y.Z）。</summary>
+    [ObservableProperty] private string _updatePopupTitle = "";
+    /// <summary>更新弹窗展示的 Release 正文（Markdown 源文本；无正文时显示兜底文案）。</summary>
+    [ObservableProperty] private string _releaseNotes = "";
+    /// <summary>弹窗内的状态行（准备/下载进度/失败/完成）。</summary>
+    [ObservableProperty] private string _popupStatusText = "";
+    /// <summary>弹窗内「更新」「跳过此版本」按钮可用状态（下载中禁用）。</summary>
+
+    [ObservableProperty] private bool _popupActionVisible = true;
 
     public UpdateViewModel(UpdateService updater, string? skippedVersion)
     {
@@ -25,29 +34,27 @@ public partial class UpdateViewModel : ObservableObject
 
     public UpdateService Updater => _updater;
 
-    /// <summary>启动后检查（自动模式，静默失败）。返回检查到的版本（供托盘气泡使用）。</summary>
+    private UpdateInfo? _cachedInfo;
+
+    /// <summary>
+    /// 启动 30 秒与每 30 分钟的静默检查入口。返回检查到的版本（跳过版本/无更新/失败均为 null）。
+    /// </summary>
     public async Task<string?> CheckSilentlyAsync()
     {
         var info = await _updater.CheckForUpdateAsync();
         if (info is null) return null;
         if (info.Version == _skippedVersion) return null;
-        ShowBanner(info, downloading: false);
+        ShowBadge(info);
         return info.Version;
     }
 
-    private UpdateInfo? _cachedInfo;
-
-    private void ShowBanner(UpdateInfo info, bool downloading)
+    private void ShowBadge(UpdateInfo info)
     {
         _cachedInfo = info;
-        UpdateBannerTitle = $"新版本 v{info.Version} 可用";
-        UpdateBannerMessage = downloading
-            ? "正在下载升级包…"
-            : info.IsPortableAssetOnly
-                ? "绿色版请从 GitHub 下载新版本"
-                : "升级将自动完成并重启程序";
-        UpdateBannerVisible = true;
-        UpdateActionVisible = !downloading;
+        ReleaseNotes = info.ReleaseNotes ?? "（发布页未提供更新说明，请前往发布页查看。）";
+        UpdatePopupTitle = $"新版本 v{info.Version}";
+        UpdateBadgeVersion = $"发现新版本 v{info.Version}，点击查看更新内容";
+        UpdateBadgeVisible = true;
     }
 
     [RelayCommand]
@@ -57,45 +64,50 @@ public partial class UpdateViewModel : ObservableObject
         var info = _cachedInfo;
         if (info is null)
         {
-            // 无缓存（罕见：横幅未经过检查流程）才回退到在线检查
+            // 无缓存（罕见：弹窗未经过检查流程）才回退到在线检查
             info = await _updater.CheckForUpdateAsync();
-            if (info is null) return;
+            if (info is null)
+            {
+                PopupStatusText = "检查更新失败，请稍后重试或前往发布页下载。";
+                return;
+            }
+            ShowBadge(info);
         }
 
-        UpdateBannerTitle = "正在准备升级…";
-        UpdateBannerMessage = "";
-        UpdateActionVisible = false;
+        PopupStatusText = "正在准备升级…";
+        PopupActionVisible = false;
 
         if (info.IsPortableAssetOnly)
         {
             _updater.OpenReleasesPage();
+            PopupStatusText = "绿色版请从发布页手动下载新版本。";
+            PopupActionVisible = true;
             return;
         }
 
         var progress = new Progress<DownloadProgress>(p =>
         {
-            UpdateBannerTitle = $"正在下载 v{info.Version}… {p.Percent}%";
-            UpdateBannerMessage = p.TotalBytes is null ? "" : $"{p.ReceivedBytes / 1048576.0:F1} / {p.TotalBytes / 1048576.0:F1} MB";
+            PopupStatusText = p.TotalBytes is null
+                ? $"正在下载 v{info.Version}… {p.Percent}%"
+                : $"正在下载 v{info.Version}… {p.Percent}%（{p.ReceivedBytes / 1048576.0:F1} / {p.TotalBytes / 1048576.0:F1} MB）";
         });
 
-        UpdateBannerTitle = $"正在下载 v{info.Version}… 0%";
+        PopupStatusText = $"正在下载 v{info.Version}… 0%";
         var setupPath = await _updater.DownloadInstallerAsync(info, progress);
         if (setupPath is null)
         {
-            UpdateBannerTitle = "升级下载失败";
-            UpdateBannerMessage = "可点击此提示旁方式手动下载";
-            UpdateActionVisible = true;
+            PopupStatusText = "升级下载失败，可前往发布页手动下载，或稍后重试。";
+            PopupActionVisible = true;
             return;
         }
 
-        UpdateBannerTitle = "下载完成，即将安装并重启…";
-        UpdateBannerMessage = "";
+        PopupStatusText = "下载完成，即将安装并重启…";
         await Task.Delay(800);   // 让用户看到状态
 
         if (!_updater.LaunchSilentSetup(setupPath))
         {
-            UpdateBannerTitle = "升级程序启动失败";
-            UpdateBannerMessage = $"请手动运行：{setupPath}";
+            PopupStatusText = $"升级程序启动失败，请手动运行：{setupPath}";
+            PopupActionVisible = true;
             return;
         }
         // Setup 会关闭本程序并自动重启——此处无需退出动作
@@ -108,7 +120,7 @@ public partial class UpdateViewModel : ObservableObject
             _skippedVersion = _cachedInfo.Version;
             SkippedVersionStore.Save(_skippedVersion);
         }
-        UpdateBannerVisible = false;
+        UpdateBadgeVisible = false;
     }
 }
 
