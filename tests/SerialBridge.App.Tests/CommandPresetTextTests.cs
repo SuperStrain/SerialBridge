@@ -61,13 +61,4 @@ public sealed class CommandPresetTextTests
         var empty = Preset("空", new CommandStep { Format = "Text", Content = "", Ending = "CR" });
         Assert.Equal("文本：（空）（换行 CR（回车））", CommandPresetText.Describe(empty));
     }
-
-    [Fact]
-    public void ConfirmMessage_ListsTargetAndStepCount()
-    {
-        var target = new MappingConfig { Name = "调试板", PortName = "COM3" };
-        var preset = Preset("reboot", new CommandStep { Content = "reboot" });
-        Assert.Equal("向 调试板 (COM3) 发送「reboot」？\n共 1 步。",
-            CommandPresetText.ConfirmMessage(target, preset));
-    }
 }

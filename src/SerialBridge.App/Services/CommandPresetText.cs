@@ -31,10 +31,6 @@ public static class CommandPresetText
         return $"宏，共 {steps.Count} 步：{summary}";
     }
 
-    /// <summary>发送确认弹窗中的目标描述。</summary>
-    public static string ConfirmMessage(MappingConfig target, CommandPreset preset) =>
-        $"向 {target.Name} ({target.PortName}) 发送「{ButtonTitle(preset)}」？\n共 {(preset.Steps?.Count ?? 0)} 步。";
-
     private static bool IsHex(CommandStep step) =>
         string.Equals(step.Format?.Trim(), "Hex", StringComparison.OrdinalIgnoreCase);
 

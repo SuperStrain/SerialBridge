@@ -3,44 +3,37 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 using SerialBridge.App.Services;
 using SerialBridge.Core.Bridge;
 using SerialBridge.Core.Models;
-using SerialBridge.Core.Serial;
 
 namespace SerialBridge.App.Views;
 
-/// <summary>Editable command shortcuts and macros for exactly one terminal mapping.</summary>
+/// <summary>快捷命令与宏的编辑窗口；发送统一由终端命令栏完成，本窗口只负责维护预设。</summary>
 public sealed class CommandPaletteWindow : Window
 {
     /// <summary>预设保存成功后触发；监听方（如终端命令栏）刷新显示。</summary>
     internal static event Action? PresetsSaved;
 
-    private readonly MappingRuntime _runtime;
     private readonly ObservableCollection<CommandPreset> _presets;
-    private readonly ListBox _list = new() { MinWidth = 160, DisplayMemberPath = "Name" };
+    private readonly ListBox _list = new() { MinWidth = 170, DisplayMemberPath = "Name" };
     private readonly TextBox _name = new() { MinWidth = 200 };
-    private readonly CheckBox _confirm = new() { Content = "执行前确认（推荐）", IsChecked = true };
     private readonly DataGrid _steps = new()
     {
         AutoGenerateColumns = false, CanUserAddRows = false,
         CanUserDeleteRows = false, HeadersVisibility = DataGridHeadersVisibility.Column,
-        MinHeight = 220, Height = 290, SelectionMode = DataGridSelectionMode.Single
+        MinHeight = 170, SelectionMode = DataGridSelectionMode.Single
     };
     private DataGridComboBoxColumn? _formatColumn;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly Button _run = new() { Content = "发送 / 运行宏" };
-    private readonly Button _cancel = new() { Content = "取消执行", IsEnabled = false };
-    private CancellationTokenSource? _runCancellation;
-    private bool _running;
 
     public CommandPaletteWindow(MappingRuntime runtime)
     {
-        _runtime = runtime;
         Title = $"快捷命令与宏 — {runtime.Config.Name} ({runtime.Config.PortName})";
-        Width = 920;
-        Height = 590;
+        Width = 880;
+        Height = 560;
         MinWidth = 760;
         MinHeight = 480;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -53,48 +46,57 @@ public sealed class CommandPaletteWindow : Window
         _list.ItemsSource = _presets;
         _list.SelectionChanged += (_, _) => SelectPreset();
         if (_presets.Count > 0) _list.SelectedIndex = 0;
-        Closed += (_, _) => _runCancellation?.Cancel();
+        else _message.Text = "点击「新增」创建第一个预设。";
+
+        // Ctrl+S 保存并关闭
+        KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                e.Handled = true;
+                Save();
+            }
+        };
     }
 
     private static Button Action(string text, Action action)
     {
-        var button = new Button { Content = text, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(10, 6, 10, 6) };
+        var button = new Button { Content = text, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(10, 5, 10, 5) };
         button.Click += (_, _) => action();
         return button;
     }
 
     private void BuildUi()
     {
-        var root = new DockPanel { Margin = new Thickness(16) };
+        var root = new DockPanel { Margin = new Thickness(14) };
         Content = root;
-        var footer = new StackPanel { Orientation = Orientation.Vertical };
-        DockPanel.SetDock(footer, Dock.Bottom);
-        footer.Children.Add(_message);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
-        actions.Children.Add(Action("保存预设", Save));
-        _run.Click += async (_, _) => await RunSelectedAsync();
-        _run.Margin = new Thickness(0, 0, 8, 0);
-        _run.Padding = new Thickness(10, 6, 10, 6);
-        actions.Children.Add(_run);
-        _cancel.Click += (_, _) => _runCancellation?.Cancel();
-        actions.Children.Add(_cancel);
-        footer.Children.Add(actions);
-        root.Children.Add(footer);
 
-        var info = new TextBlock
+        // 底部：状态消息 + 保存按钮（保存成功后自动关闭窗口）
+        var footer = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _message.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(_message, 0);
+        footer.Children.Add(_message);
+        var saveButton = new Button
         {
-            Text = "快捷命令 = 1 个步骤；宏 = 多个步骤。Text 默认 UTF-8；HEX 使用 01 03 FF 格式（换行自动为 None）。每个步骤发送后可延时。仅向当前映射发送，不执行本机命令。",
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12)
+            Content = "保存预设", MinWidth = 100,
+            Padding = new Thickness(18, 6, 18, 6), Margin = new Thickness(10, 0, 0, 0),
+            ToolTip = "保存全部预设并关闭窗口（Ctrl+S）"
         };
-        DockPanel.SetDock(info, Dock.Top);
-        root.Children.Add(info);
+        saveButton.Click += (_, _) => Save();
+        Grid.SetColumn(saveButton, 1);
+        footer.Children.Add(saveButton);
+        DockPanel.SetDock(footer, Dock.Bottom);
+        root.Children.Add(footer);
 
         var body = new Grid();
         body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         root.Children.Add(body);
 
+        // 左列：新增/删除在顶部，列表随窗口拉伸
         var left = new DockPanel();
         Grid.SetColumn(left, 0);
         body.Children.Add(left);
@@ -105,28 +107,46 @@ public sealed class CommandPaletteWindow : Window
         left.Children.Add(listActions);
         left.Children.Add(_list);
 
-        var right = new StackPanel();
+        // 右列：名称 → 步骤工具 → 步骤表格（随窗口拉伸）→ 提示
+        var right = new Grid();
         Grid.SetColumn(right, 2);
+        right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         body.Children.Add(right);
-        right.Children.Add(new TextBlock { Text = "名称", Margin = new Thickness(0, 0, 0, 4) });
-        right.Children.Add(_name);
+
+        var namePanel = new StackPanel();
+        namePanel.Children.Add(new TextBlock { Text = "名称", Margin = new Thickness(0, 0, 0, 4) });
+        namePanel.Children.Add(_name);
         _name.TextChanged += (_, _) =>
         {
-            if (_list.SelectedItem is CommandPreset p && !_running)
+            if (_list.SelectedItem is CommandPreset p)
             {
                 p.Name = _name.Text;
                 // List selection remains stable while the name is being edited.
             }
         };
-        _confirm.Margin = new Thickness(0, 10, 0, 10);
-        _confirm.Checked += (_, _) => UpdateConfirmation();
-        _confirm.Unchecked += (_, _) => UpdateConfirmation();
-        right.Children.Add(_confirm);
+        Grid.SetRow(namePanel, 0);
+        right.Children.Add(namePanel);
 
-        var stepTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        var stepTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 6) };
         stepTools.Children.Add(Action("添加步骤", AddStep));
         stepTools.Children.Add(Action("删除步骤", DeleteStep));
+        Grid.SetRow(stepTools, 1);
         right.Children.Add(stepTools);
+
+        Grid.SetRow(_steps, 2);
+        right.Children.Add(_steps);
+
+        var hint = new TextBlock
+        {
+            Text = "换行 CR = 回车键（串口控制台标准）；Hex 格式换行固定为 None；单步 ≤4096 字节、≤100 步、延时 0–60000ms。",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0),
+            Foreground = Brushes.DimGray
+        };
+        Grid.SetRow(hint, 3);
+        right.Children.Add(hint);
 
         _steps.Columns.Add(new DataGridTextColumn
         {
@@ -151,13 +171,6 @@ public sealed class CommandPaletteWindow : Window
             Header = "延时 ms", Width = new DataGridLength(85),
             Binding = new Binding(nameof(CommandStep.DelayMs)) { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged }
         });
-        right.Children.Add(_steps);
-        right.Children.Add(new TextBlock
-        {
-            Text = "换行 CR = 回车键（串口控制台标准）；LF/CRLF 仅特殊设备需要。切换为 Hex 时换行自动置为 None。单步最多 4096 字节，最多 100 步，单步延时 0–60000ms。宏顺序发送；有其他 TCP 客户端写入时仍可能交错。",
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0),
-            Foreground = Brushes.DimGray
-        });
         // Hex 步骤不允许换行、Text 步骤通常要回车：随格式自动纠正，避免发送时报错。
         _steps.CellEditEnding += OnStepCellEditEnding;
     }
@@ -165,7 +178,7 @@ public sealed class CommandPaletteWindow : Window
     private void OnStepCellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
     {
         if (e.EditAction != DataGridEditAction.Commit || e.Column != _formatColumn ||
-            _running || e.Row.Item is not CommandStep step) return;
+            e.Row.Item is not CommandStep step) return;
         // 格式列绑定带 PropertyChanged 触发器，提交时模型已是新值。
         var format = NormalizeFormat(step.Format);
         if (step.Format != format) step.Format = format;
@@ -180,23 +193,13 @@ public sealed class CommandPaletteWindow : Window
     private void SelectPreset()
     {
         var preset = _list.SelectedItem as CommandPreset;
-        _name.IsEnabled = !_running && preset is not null;
-        _confirm.IsEnabled = !_running && preset is not null;
-        _steps.IsReadOnly = _running;
+        _name.IsEnabled = preset is not null;
         _name.Text = preset?.Name ?? "";
-        _confirm.IsChecked = preset?.ConfirmBeforeRun ?? true;
         _steps.ItemsSource = preset?.Steps;
-    }
-
-    private void UpdateConfirmation()
-    {
-        if (_list.SelectedItem is CommandPreset p && !_running)
-            p.ConfirmBeforeRun = _confirm.IsChecked == true;
     }
 
     private void AddPreset()
     {
-        if (_running) return;
         if (_presets.Count >= 200) { _message.Text = "预设最多 200 个。"; return; }
         var preset = new CommandPreset { Name = "新命令" };
         _presets.Add(preset);
@@ -205,16 +208,17 @@ public sealed class CommandPaletteWindow : Window
 
     private void DeletePreset()
     {
-        if (_running || _list.SelectedItem is not CommandPreset p) return;
+        if (_list.SelectedItem is not CommandPreset p) return;
         if (MessageBox.Show($"删除预设「{p.Name}」？", "删除", MessageBoxButton.YesNo,
                 MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         _presets.Remove(p);
         _list.SelectedIndex = _presets.Count > 0 ? 0 : -1;
+        if (_presets.Count == 0) _message.Text = "点击「新增」创建预设。";
     }
 
     private void AddStep()
     {
-        if (_running || _list.SelectedItem is not CommandPreset p) return;
+        if (_list.SelectedItem is not CommandPreset p) return;
         if (p.Steps.Count >= 100) { _message.Text = "每个宏最多 100 步。"; return; }
         p.Steps.Add(new CommandStep());
         _steps.ItemsSource = null;
@@ -224,8 +228,7 @@ public sealed class CommandPaletteWindow : Window
 
     private void DeleteStep()
     {
-        if (_running || _list.SelectedItem is not CommandPreset p ||
-            _steps.SelectedItem is not CommandStep step) return;
+        if (_list.SelectedItem is not CommandPreset p || _steps.SelectedItem is not CommandStep step) return;
         if (p.Steps.Count <= 1) { _message.Text = "至少保留一个步骤。"; return; }
         p.Steps.Remove(step);
         _steps.ItemsSource = null;
@@ -264,49 +267,10 @@ public sealed class CommandPaletteWindow : Window
             // This ensures subsequent unsaved edits are discarded on close.
             AppServices.Settings.CommandPresets = SnapshotPresets(_presets);
             AppServices.SaveSettings();
-            _message.Text = "预设已保存。";
             PresetsSaved?.Invoke();
+            // 保存成功即关闭，编辑完成立即回到终端；失败时留在窗口显示原因。
+            Close();
         }
         catch (Exception ex) { _message.Text = "保存失败：" + ex.Message; }
-    }
-
-    private async Task RunSelectedAsync()
-    {
-        if (_running || _list.SelectedItem is not CommandPreset preset) return;
-        try
-        {
-            CommitPendingEdit();
-            // A draft in a different preset must not block this valid command.
-            ValidatePreset(preset);
-            CommandPresetSender.ThrowIfNotConnected(_runtime);
-            var snapshot = JsonSerializer.Deserialize<CommandPreset>(JsonSerializer.Serialize(preset))!;
-            if (snapshot.ConfirmBeforeRun &&
-                MessageBox.Show($"向 { _runtime.Config.Name } ({ _runtime.Config.PortName }) 发送「{snapshot.Name}」？\n共 {snapshot.Steps.Count} 步。",
-                    "确认目标设备", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-                return;
-            using var cancellation = new CancellationTokenSource();
-            _runCancellation = cancellation;
-            _running = true;
-            _run.IsEnabled = false;
-            _cancel.IsEnabled = true;
-            _steps.IsReadOnly = true;
-            _list.IsEnabled = false;
-            _message.Text = "执行中…";
-            // Aborts permanently once the mapping stops or the serial port drops;
-            // even auto-reconnect during a step delay does not resume the macro.
-            await CommandPresetSender.SendAsync(_runtime, snapshot, cancellation.Token);
-            _message.Text = "全部步骤已进入串口发送队列。";
-        }
-        catch (OperationCanceledException) { _message.Text = "宏已取消。"; }
-        catch (Exception ex) { _message.Text = "执行中止：" + ex.Message; }
-        finally
-        {
-            _running = false;
-            _run.IsEnabled = true;
-            _cancel.IsEnabled = false;
-            _steps.IsReadOnly = false;
-            _list.IsEnabled = true;
-            _runCancellation = null;
-        }
     }
 }

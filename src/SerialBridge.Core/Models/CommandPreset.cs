@@ -18,7 +18,6 @@ public sealed class CommandPreset : System.ComponentModel.INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Name)));
         }
     }
-    public bool ConfirmBeforeRun { get; set; } = true;
     public List<CommandStep> Steps { get; set; } = new() { new() };
 }
 

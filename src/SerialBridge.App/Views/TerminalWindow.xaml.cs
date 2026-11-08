@@ -278,12 +278,8 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                 SetCommandBarStatus(ex.Message, error: true);
                 return;
             }
-            if (snapshot.ConfirmBeforeRun && MessageBox.Show(this,
-                    CommandPresetText.ConfirmMessage(_runtime.Config, snapshot),
-                    "确认目标设备", MessageBoxButton.YesNo, MessageBoxImage.Warning,
-                    MessageBoxResult.Yes) != MessageBoxResult.Yes)
-                return;
 
+            // 点击即发送（无确认弹窗）；多步宏可用「停止」中断后续步骤。
             var cancellation = new CancellationTokenSource();
             _commandBarCancellation = cancellation;
             SetCommandBarButtonStates(false);
