@@ -68,6 +68,8 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
             _viewModel.Detach();
             _runtime.DataTransferred -= OnDeviceData;
             CommandPaletteWindow.PresetsSaved -= OnPresetsSaved;
+            // 关闭终端即中止命令栏宏：窗口没了，后台不能再向设备继续发送剩余步骤。
+            _commandBarCancellation?.Cancel();
             OpenWindows.Remove(runtime.Config.Id);
             _ = CleanupWebViewAsync();
         };

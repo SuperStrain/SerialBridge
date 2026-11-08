@@ -28,6 +28,8 @@ public sealed class CommandPaletteWindow : Window
     };
     private DataGridComboBoxColumn? _formatColumn;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap };
+    private CommandStep? _editingFormatStep;
+    private string? _editingOriginalFormat;
 
     public CommandPaletteWindow(MappingRuntime runtime)
     {
@@ -172,19 +174,48 @@ public sealed class CommandPaletteWindow : Window
             Binding = new Binding(nameof(CommandStep.DelayMs)) { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged }
         });
         // Hex 步骤不允许换行、Text 步骤通常要回车：随格式自动纠正，避免发送时报错。
+        _steps.BeginningEdit += OnStepCellBeginEdit;
         _steps.CellEditEnding += OnStepCellEditEnding;
+    }
+
+    private void OnStepCellBeginEdit(object? sender, DataGridBeginningEditEventArgs e)
+    {
+        // 记录进入编辑时的原始格式：仅在格式真正变化时才纠正换行。
+        if (e.Column != _formatColumn || e.Row.Item is not CommandStep step)
+        {
+            _editingFormatStep = null;
+            return;
+        }
+        _editingFormatStep = step;
+        _editingOriginalFormat = step.Format;
     }
 
     private void OnStepCellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
     {
-        if (e.EditAction != DataGridEditAction.Commit || e.Column != _formatColumn ||
-            e.Row.Item is not CommandStep step) return;
+        if (e.Column != _formatColumn || e.Row.Item is not CommandStep step)
+        {
+            _editingFormatStep = null;
+            return;
+        }
+        var originalFormat = _editingFormatStep == step ? _editingOriginalFormat : null;
+        _editingFormatStep = null;
+        if (e.EditAction != DataGridEditAction.Commit) return;
         // 格式列绑定带 PropertyChanged 触发器，提交时模型已是新值。
         var format = NormalizeFormat(step.Format);
         if (step.Format != format) step.Format = format;
-        step.Ending = format == "Hex" ? "None" : step.Ending == "None" ? "CR" : step.Ending;
+        // 未切换格式时不得覆盖用户显式配置的换行（例如 Text + None）。
+        step.Ending = ComputeEndingAfterFormatChange(originalFormat, format, step.Ending);
         // CommandStep 带 INPC：直接赋值即可刷新同行换行 ComboBox 的显示。
         // 不能在此调用 Items.Refresh —— 编辑事务尚未结束会抛 InvalidOperationException。
+    }
+
+    /// <summary>格式实际变化时的换行纠正规则；格式未变化则原样保留当前配置。</summary>
+    internal static string ComputeEndingAfterFormatChange(string? originalFormat, string newFormat, string currentEnding)
+    {
+        var format = newFormat?.Trim();
+        var original = originalFormat?.Trim();
+        if (string.Equals(original, format, StringComparison.OrdinalIgnoreCase)) return currentEnding;
+        return string.Equals(format, "Hex", StringComparison.OrdinalIgnoreCase) ? "None" : "CR";
     }
 
     private static string NormalizeFormat(string? format) =>
