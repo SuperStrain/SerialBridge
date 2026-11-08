@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 412" width="1200" height="412">
+  <title id="title">AI agents meet real hardware</title><desc id="desc">AI Agent / Developer connects over TCP to SerialBridge on Windows, which bridges the physical COM port to an embedded device over UART.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#F7FAFF"/><stop offset="1" stop-color="#EEF4FF"/></linearGradient>
+    <linearGradient id="middle" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2363E8"/><stop offset="1" stop-color="#1241AC"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-25%" width="145%" height="160%"><feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#0F2950" flood-opacity=".11"/></filter>
+    <marker id="leftarrow" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto-start-reverse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#5B83BC"/></marker>
+    <marker id="rightarrow" markerWidth="9" markerHeight="9" refX="5" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 Z" fill="#5B83BC"/></marker>
+  </defs>
+  <rect width="1200" height="412" rx="26" fill="url(#bg)"/>
+  <circle cx="1102" cy="53" r="135" fill="#DCE9FC" opacity=".46"/><circle cx="81" cy="351" r="125" fill="#DDEBFF" opacity=".5"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Arial,sans-serif">
+    <text x="46" y="55" font-size="24" font-weight="700" fill="#17345E">AI agents meet real hardware</text>
+    <text x="47" y="81" font-size="13.5" fill="#607794">Trusted local network · bidirectional transparent serial transport</text>
+    <g filter="url(#shadow)">
+      <rect x="46" y="124" width="310" height="195" rx="18" fill="#FFFFFF" stroke="#D8E4F5"/>
+      <rect x="445" y="124" width="310" height="195" rx="18" fill="url(#middle)"/>
+      <rect x="844" y="124" width="310" height="195" rx="18" fill="#FFFFFF" stroke="#D8E4F5"/>
+    </g>
+    <g transform="translate(70 146)" stroke="#2563EB" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <rect x="2" y="10" width="42" height="32" rx="8" fill="#E9F0FF"/><path d="M23 4v6M13 22h1M32 22h1M12 32h22"/><circle cx="13" cy="22" r="2" fill="#2563EB" stroke="none"/><circle cx="33" cy="22" r="2" fill="#2563EB" stroke="none"/>
+    </g>
+    <g transform="translate(470 147)" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <rect x="0" y="4" width="45" height="36" rx="9" stroke-opacity=".9"/><path d="M10 17h25M10 26h25M15 34h15" stroke-opacity=".75"/><circle cx="36" cy="17" r="2.5" fill="#DCEBFF" stroke="none"/>
+    </g>
+    <g transform="translate(870 147)" stroke="#257455" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <rect x="5" y="8" width="38" height="34" rx="5" fill="#E5F7EE"/><path d="M0 16h5M0 25h5M0 34h5M43 16h5M43 25h5M43 34h5M14 3v5M25 3v5M36 3v5M14 42v5M25 42v5M36 42v5"/>
+    </g>
+    <text x="70" y="230" font-size="20" font-weight="700" fill="#1B3556">AI Agent / Developer</text>
+    <text x="70" y="257" font-size="14" fill="#516987">Inspect logs · Run diagnostics</text>
+    <rect x="70" y="277" width="238" height="26" rx="13" fill="#EEF3FD"/>
+    <text x="83" y="295" font-size="12.5" fill="#4B6691">Linux · Windows · Scripts</text>
+    <text x="469" y="230" font-size="23" font-weight="750" fill="#FFFFFF">SerialBridge</text>
+    <text x="469" y="257" font-size="14" fill="#DFEAFF">Windows serial ↔ TCP bridge</text>
+    <rect x="469" y="277" width="244" height="26" rx="13" fill="#FFFFFF" fill-opacity=".18"/>
+    <text x="482" y="295" font-size="13" font-weight="600" fill="#FFFFFF">TCP :9001 ↔ COM3</text>
+    <text x="869" y="230" font-size="20" font-weight="700" fill="#1B3556">Embedded device</text>
+    <text x="869" y="257" font-size="14" fill="#516987">Debug UART · Serial console</text>
+    <rect x="869" y="277" width="237" height="26" rx="13" fill="#E8F7EF"/>
+    <text x="882" y="295" font-size="12.5" fill="#287354">Linux Board · MCU</text>
+    <path d="M369 221 H431" stroke="#5B83BC" stroke-width="3" fill="none" stroke-linecap="round" marker-start="url(#leftarrow)" marker-end="url(#rightarrow)"/>
+    <path d="M768 221 H830" stroke="#5B83BC" stroke-width="3" fill="none" stroke-linecap="round" marker-start="url(#leftarrow)" marker-end="url(#rightarrow)"/>
+    <text x="400" y="198" text-anchor="middle" font-size="12.5" font-weight="650" fill="#3463A5">LAN · TCP</text>
+    <text x="799" y="198" text-anchor="middle" font-size="12.5" font-weight="650" fill="#3463A5">USB / UART</text>
+    <path d="M46 352 H1154" stroke="#D6E3F2" stroke-width="1.2"/>
+    <text x="47" y="378" font-size="12.5" fill="#607794">192.168.1.100:9001 is an example endpoint; SerialBridge does not include an AI model.</text>
+  </g>
+</svg>
