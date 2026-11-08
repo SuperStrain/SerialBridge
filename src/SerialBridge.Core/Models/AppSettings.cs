@@ -19,6 +19,9 @@ public sealed class GeneralSettings
 
     /// <summary>自动检查更新（GitHub Releases）。</summary>
     public bool AutoCheckUpdates { get; set; } = true;
+
+    /// <summary>串口终端底部快捷命令栏是否显示。</summary>
+    public bool ShowCommandBar { get; set; } = true;
 }
 
 /// <summary>整个应用的持久化根对象。</summary>

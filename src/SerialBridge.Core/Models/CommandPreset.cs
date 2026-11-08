@@ -18,19 +18,64 @@ public sealed class CommandPreset : System.ComponentModel.INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Name)));
         }
     }
-    public bool ConfirmBeforeRun { get; set; } = true;
     public List<CommandStep> Steps { get; set; } = new() { new() };
 }
 
-public sealed class CommandStep
+public sealed class CommandStep : System.ComponentModel.INotifyPropertyChanged
 {
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+    private string _format = "Text";
+    private string _content = "";
+    private string _ending = "CR";
+    private int _delayMs;
+
     /// <summary>Text or Hex. Hex accepts whitespace between byte pairs.</summary>
-    public string Format { get; set; } = "Text";
-    public string Content { get; set; } = "";
+    public string Format
+    {
+        get => _format;
+        set
+        {
+            if (_format == value) return;
+            _format = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Format)));
+        }
+    }
+
+    public string Content
+    {
+        get => _content;
+        set
+        {
+            if (_content == value) return;
+            _content = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Content)));
+        }
+    }
+
     /// <summary>None, CR, LF or CRLF; used for text only.</summary>
-    public string Ending { get; set; } = "CR";
+    public string Ending
+    {
+        get => _ending;
+        set
+        {
+            if (_ending == value) return;
+            _ending = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Ending)));
+        }
+    }
+
     /// <summary>Delay after this step (0-60000ms).</summary>
-    public int DelayMs { get; set; }
+    public int DelayMs
+    {
+        get => _delayMs;
+        set
+        {
+            if (_delayMs == value) return;
+            _delayMs = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(DelayMs)));
+        }
+    }
 }
 
 /// <summary>

@@ -3,10 +3,14 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
+using SerialBridge.App.Services;
 using SerialBridge.App.ViewModels;
 using SerialBridge.Core.Bridge;
+using SerialBridge.Core.Models;
 
 namespace SerialBridge.App.Views;
 
@@ -19,11 +23,23 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
 {
     private static readonly Dictionary<Guid, TerminalWindow> OpenWindows = new();
 
+    private static readonly SolidColorBrush CommandBarMuted = FrozenBrush("#9399B2");
+    private static readonly SolidColorBrush CommandBarError = FrozenBrush("#F38BA8");
+    private const string EmptyCommandBarHint = "暂无快捷命令，点击「编辑」创建";
+
     private readonly TerminalViewModel _viewModel;
     private readonly MappingRuntime _runtime;
     private readonly TerminalWindowLifetime _lifetime = new();
+    private CancellationTokenSource? _commandBarCancellation;
     private Task? _initializationTask;
     private bool _ready;
+
+    private static SolidColorBrush FrozenBrush(string hex)
+    {
+        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+        brush.Freeze();
+        return brush;
+    }
 
     /// <summary>打开（或激活）指定映射的串口终端窗口。</summary>
     public static void OpenFor(MappingRuntime runtime)
@@ -51,10 +67,19 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         {
             _viewModel.Detach();
             _runtime.DataTransferred -= OnDeviceData;
+            CommandPaletteWindow.PresetsSaved -= OnPresetsSaved;
+            // 关闭终端即中止命令栏宏：窗口没了，后台不能再向设备继续发送剩余步骤。
+            _commandBarCancellation?.Cancel();
             OpenWindows.Remove(runtime.Config.Id);
             _ = CleanupWebViewAsync();
         };
         _runtime.DataTransferred += OnDeviceData;
+        CommandPaletteWindow.PresetsSaved += OnPresetsSaved;
+
+        // 命令栏显隐持久化（全局），打开时按上次状态恢复
+        CommandBarHost.Visibility = AppServices.Settings.General.ShowCommandBar
+            ? Visibility.Visible : Visibility.Collapsed;
+        if (CommandBarHost.Visibility == Visibility.Visible) RebuildCommandBar();
     }
 
     protected override void OnContentRendered(EventArgs e)
@@ -166,17 +191,147 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
-    // Open a modal palette so terminal typing cannot accidentally mix with macro execution.
+    // ---------- 快捷命令栏（Xshell 式） ----------
+
+    // 工具栏按钮切换命令栏显隐；编辑入口在栏内「编辑」。
     private void OnCommandsClick(object sender, RoutedEventArgs e)
+    {
+        if (_lifetime.IsClosing) return;
+        var show = CommandBarHost.Visibility != Visibility.Visible;
+        CommandBarHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        AppServices.Settings.General.ShowCommandBar = show;
+        AppServices.SaveSettingsSafe();
+        if (show) RebuildCommandBar();
+        RefocusTerminal();
+    }
+
+    private void OnCommandBarEditClick(object sender, RoutedEventArgs e)
     {
         if (_lifetime.IsClosing) return;
         var dialog = new CommandPaletteWindow(_runtime) { Owner = this };
         dialog.ShowDialog();
-        if (_ready && !_lifetime.IsClosing)
+        RefocusTerminal();
+    }
+
+    private void OnCommandBarStopClick(object sender, RoutedEventArgs e) =>
+        _commandBarCancellation?.Cancel();
+
+    private void OnPresetsSaved()
+    {
+        if (_lifetime.IsClosing) return;
+        RebuildCommandBar();
+    }
+
+    private void RebuildCommandBar()
+    {
+        if (CommandBarHost.Visibility != Visibility.Visible || _lifetime.IsClosing) return;
+        CommandBarButtons.Children.Clear();
+        var presets = AppServices.Settings.CommandPresets;
+        if (presets.Count == 0)
         {
-            Web.Focus();
-            _ = Web.ExecuteScriptAsync("window.focusTerm()");
+            SetCommandBarStatus(EmptyCommandBarHint);
+            return;
         }
+        if (CommandBarStatus.Text == EmptyCommandBarHint) SetCommandBarStatus("");
+        foreach (var preset in presets)
+        {
+            var title = new TextBlock
+            {
+                Text = CommandPresetText.ButtonTitle(preset),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = 160
+            };
+            var button = new Wpf.Ui.Controls.Button
+            {
+                Content = title,
+                Margin = new Thickness(0, 0, 8, 0),
+                ToolTip = CommandPresetText.Describe(preset)
+            };
+            button.Click += async (_, _) => await SendPresetFromBarAsync(preset);
+            CommandBarButtons.Children.Add(button);
+        }
+        // 重建可能发生在宏运行中（保存预设触发），恢复禁用状态。
+        if (_commandBarCancellation is not null) SetCommandBarButtonStates(false);
+    }
+
+    private async Task SendPresetFromBarAsync(CommandPreset preset)
+    {
+        if (_lifetime.IsClosing || _commandBarCancellation is not null) return;
+        CancellationTokenSource? cancellation = null;
+        try
+        {
+            // 冻结点击时刻的预设快照，运行期间的编辑/删除不影响本次发送。
+            var snapshot = JsonSerializer.Deserialize<CommandPreset>(JsonSerializer.Serialize(preset));
+            if (snapshot is null) return;
+            try
+            {
+                foreach (var step in snapshot.Steps) CommandMacroRunner.Encode(step);
+            }
+            catch (FormatException ex)
+            {
+                SetCommandBarStatus($"「{CommandPresetText.ButtonTitle(snapshot)}」配置无效：{ex.Message}", error: true);
+                return;
+            }
+            try
+            {
+                CommandPresetSender.ThrowIfNotConnected(_runtime);
+            }
+            catch (IOException ex)
+            {
+                SetCommandBarStatus(ex.Message, error: true);
+                return;
+            }
+
+            // 点击即发送（无确认弹窗）；多步宏可用「停止」中断后续步骤。
+            // 取消源与窗口生命周期关联：关闭终端（BeginClose）立即中止宏，
+            // 不会在窗口关闭后继续向设备发送剩余步骤。
+            cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            _commandBarCancellation = cancellation;
+            SetCommandBarButtonStates(false);
+            CommandBarStop.Visibility = Visibility.Visible;
+            SetCommandBarStatus(snapshot.Steps.Count == 1
+                ? $"发送「{CommandPresetText.ButtonTitle(snapshot)}」…"
+                : $"执行宏「{CommandPresetText.ButtonTitle(snapshot)}」…");
+            // 断开/停止映射后永久中止；单步命令瞬时入队，多步宏可用「停止」中断。
+            await CommandPresetSender.SendAsync(_runtime, snapshot, cancellation.Token);
+            SetCommandBarStatus($"已发送「{CommandPresetText.ButtonTitle(snapshot)}」");
+        }
+        catch (OperationCanceledException)
+        {
+            SetCommandBarStatus("宏已中止。");
+        }
+        catch (Exception ex)
+        {
+            SetCommandBarStatus("发送失败：" + ex.Message, error: true);
+        }
+        finally
+        {
+            _commandBarCancellation = null;
+            cancellation?.Dispose();   // 执行结束后释放取消源
+            SetCommandBarButtonStates(true);
+            CommandBarStop.Visibility = Visibility.Collapsed;
+            RefocusTerminal();
+        }
+    }
+
+    private void SetCommandBarButtonStates(bool enabled)
+    {
+        foreach (var child in CommandBarButtons.Children.OfType<UIElement>())
+            child.IsEnabled = enabled;
+    }
+
+    private void SetCommandBarStatus(string text, bool error = false)
+    {
+        CommandBarStatus.Text = text;
+        CommandBarStatus.Foreground = error ? CommandBarError : CommandBarMuted;
+        CommandBarStatus.ToolTip = text;
+    }
+
+    private void RefocusTerminal()
+    {
+        if (!_ready || _lifetime.IsClosing) return;
+        Web.Focus();
+        _ = Web.ExecuteScriptAsync("window.focusTerm()");
     }
 
     // JS 按键 → 串口
