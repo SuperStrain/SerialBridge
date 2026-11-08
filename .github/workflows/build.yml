@@ -12,7 +12,7 @@ on:
         description: 'Build only, force a manual release, or legacy retry (main only)'
         type: choice
         required: true
-        default: build_only
+        default: manual_release
         options:
           - build_only
           - manual_release
@@ -35,14 +35,14 @@ jobs:
       - name: Require main for manually requested release
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only' && github.ref != 'refs/heads/main' }}
         run: |
-          echo 'Manual release retry must be launched from main.' >&2
+          echo 'Explicit manual release must be launched from main.' >&2
           exit 1
       - uses: actions/checkout@v4
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only') }}
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check 4-day window and source changes
+      - name: Determine release eligibility and version
         id: check
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only') }}
         env:
@@ -53,6 +53,19 @@ jobs:
             python3 scripts/release_eligibility.py --manual
           else
             python3 scripts/release_eligibility.py
+          fi
+      - name: Fail if explicit release was not selected for publication
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only' }}
+        shell: bash
+        env:
+          ELIGIBLE: ${{ steps.check.outputs.eligible }}
+          RELEASE_VERSION: ${{ steps.check.outputs.version }}
+          RELEASE_SHA: ${{ steps.check.outputs.source_sha }}
+        run: |
+          # A manually requested release MUST NOT report green with test/package skipped.
+          if [ "$ELIGIBLE" != "true" ] || [ -z "$RELEASE_VERSION" ] || [ -z "$RELEASE_SHA" ]; then
+            echo 'Manual release was not accepted; refusing to mark this workflow successful.' >&2
+            exit 1
           fi
 
   test:
