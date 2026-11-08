@@ -70,7 +70,7 @@ For example, your AI agent runs on a Linux workstation while the development boa
 
 ```bash
 # Run on the agent's Linux host; replace with your Windows host's LAN IP
-python3 skills/serial-tcp-uart/scripts/serial_session.py \\
+python3 skills/serial-tcp-uart/scripts/serial_session.py \
   --host 192.168.1.100 --port 9001 exec "uname -a"
 ```
 
