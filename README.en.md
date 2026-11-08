@@ -98,7 +98,7 @@ socat PTY,link=/tmp/ttydev,waitslave TCP:192.168.1.100:9001 &
 picocom /tmp/ttydev
 ```
 
-Close `picocom` and clean up the matching `socat` process afterward. See the [user guide](docs/用户使用说明.md#10-从-linux-主机访问ubuntu-等) (Chinese) for additional connection options and troubleshooting.
+Close `picocom` and clean up the matching `socat` process afterward. See the [user guide](docs/用户使用说明.md) (Chinese) for additional connection options and troubleshooting.
 
 ### One-click terminal commands
 
