@@ -2,17 +2,19 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using SerialBridge.App.Services;
 using SerialBridge.App.ViewModels;
 
 namespace SerialBridge.App.Views;
 
 /// <summary>
-/// 更新弹窗（Clash Verge 式）：标题 + Release 正文 + 前往发布 / 取消 / 更新 / 跳过此版本。
-/// 由主界面 NEW 徽章点击打开；下载进度在状态行展示，安装由 Setup 接力重启。
+/// 更新弹窗(Clash Verge 式):标题 + Release 正文(Markdown 渲染)+ 前往发布 / 取消 / 更新 / 跳过此版本。
+/// 由主界面 NEW 徽章点击打开;下载进度在状态行展示,安装由 Setup 接力重启。
 /// </summary>
 public sealed class UpdatePopupWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly UpdateViewModel _update;
+    private readonly FlowDocumentScrollViewer _notesHost;
 
     public UpdatePopupWindow(UpdateViewModel update)
     {
@@ -96,18 +98,26 @@ public sealed class UpdatePopupWindow : Wpf.Ui.Controls.FluentWindow
         header.Children.Add(releaseButton);
         root.Children.Add(header);
 
-        // 中部：Release 正文（可滚动、可选中复制）
-        var notes = new TextBox
+        // 中部：Release 正文（Markdown 渲染，可滚动、可选中复制）
+        _notesHost = new FlowDocumentScrollViewer
         {
-            IsReadOnly = true,
-            TextWrapping = TextWrapping.Wrap,
-            BorderThickness = new Thickness(0),
-            Background = Brushes.Transparent,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            FontSize = 13,
-            Padding = new Thickness(0)
+            Background = Brushes.Transparent,
+            IsToolBarVisible = false,   // 隐藏底部缩放工具条
         };
-        root.Children.Add(notes);
-        notes.SetBinding(TextBox.TextProperty, new Binding(nameof(UpdateViewModel.ReleaseNotes)));
+        root.Children.Add(_notesHost);
+        RenderNotes();
+        _update.PropertyChanged += OnUpdatePropertyChanged;
+        Closed += (_, _) => _update.PropertyChanged -= OnUpdatePropertyChanged;
+    }
+
+    private void RenderNotes()
+    {
+        _notesHost.Document = ReleaseNotesRenderer.ToFlowDocument(_update.ReleaseNotes);
+    }
+
+    private void OnUpdatePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(UpdateViewModel.ReleaseNotes)) RenderNotes();
     }
 }
