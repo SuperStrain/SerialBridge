@@ -38,10 +38,11 @@ jobs:
           echo 'Explicit manual release must be launched from main.' >&2
           exit 1
       - uses: actions/checkout@v4
-        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only') }}
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify release eligibility policy
+        run: python3 -m unittest discover -s tests -p test_release_eligibility.py -v
       - name: Determine release eligibility and version
         id: check
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only') }}
