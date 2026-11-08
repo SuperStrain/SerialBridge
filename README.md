@@ -70,7 +70,7 @@ SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供
 
 ```bash
 # 在 Agent 所在的 Linux 主机上，按实际主机 IP 修改地址
-python3 skills/serial-tcp-uart/scripts/serial_session.py \\
+python3 skills/serial-tcp-uart/scripts/serial_session.py \
   --host 192.168.1.100 --port 9001 exec "uname -a"
 ```
 
