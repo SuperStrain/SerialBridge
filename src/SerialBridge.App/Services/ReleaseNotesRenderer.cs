@@ -58,6 +58,8 @@ public static class ReleaseNotesRenderer
 
     private static Brush CodeBackground => new SolidColorBrush(Color.FromArgb(0x18, 0x80, 0x80, 0x80));
 
+    private static Brush QuoteBorder => new SolidColorBrush(Color.FromArgb(0x40, 0x80, 0x80, 0x80));
+
     // ---------- 块级 ----------
 
     private static void AddBlock(BlockCollection target, MdBlock block, int depth, string? bullet)
@@ -147,31 +149,20 @@ public static class ReleaseNotesRenderer
         return int.TryParse(list.OrderedStart, out var start) ? start : 1;
     }
 
-    private static Paragraph BuildQuote(QuoteBlock quote, int depth)
+    private static Section BuildQuote(QuoteBlock quote, int depth)
     {
-        var paragraph = new Paragraph
+        // 引用渲染为左侧竖线的缩进容器:内部子块(段落/列表/代码/嵌套引用)递归复用块级渲染,
+        // 避免只处理段落导致引用中的列表与代码块内容被丢弃。
+        var section = new Section
         {
-            Margin = new Thickness(depth * 14 + 12, 2, 0, 2),
-            Foreground = SecondaryBrush,
+            Margin = new Thickness(depth * 14 + 6, 2, 0, 6),
+            Padding = new Thickness(8, 0, 0, 0),
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            BorderBrush = QuoteBorder,
         };
-        CollectQuoteText(paragraph, quote);
-        return paragraph;
-    }
-
-    private static void CollectQuoteText(Paragraph paragraph, QuoteBlock quote)
-    {
         foreach (var child in quote)
-        {
-            switch (child)
-            {
-                case ParagraphBlock p:
-                    AddInline(paragraph.Inlines, p.Inline, FontWeights.Normal, FontStyles.Italic, 13);
-                    break;
-                case QuoteBlock nested:
-                    CollectQuoteText(paragraph, nested);
-                    break;
-            }
-        }
+            AddBlock(section.Blocks, child, depth, bullet: null);
+        return section;
     }
 
     private static Paragraph BuildCodeBlock(MdBlock block)

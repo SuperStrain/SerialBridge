@@ -86,6 +86,38 @@ public sealed class ReleaseNotesRendererTests
         Assert.DoesNotContain(texts, t => t.Contains("隐藏注释"));
     }
 
+    [Fact]
+    public void Quote_PreservesListsAndCodeBlocks()
+    {
+        // 审查发现的行为回归:引用中的列表与代码块不得被丢弃
+        var doc = ReleaseNotesRenderer.ToFlowDocument(
+            "> 升级提示:\n>\n> - 升级前备份配置\n> - 关闭程序\n>\n> ```\n> setup.exe /SILENT\n> ```");
+
+        var section = Assert.IsType<Section>(doc.Blocks.FirstBlock!);
+        var texts = ParagraphTexts(section.Blocks).ToList();
+
+        Assert.Contains(texts, t => t.Contains("升级提示"));
+        Assert.Contains(texts, t => t.Contains("• 升级前备份配置"));
+        Assert.Contains(texts, t => t.Contains("• 关闭程序"));
+        Assert.Contains(texts, t => t.Contains("setup.exe /SILENT"));
+    }
+
+    private static IEnumerable<string> ParagraphTexts(BlockCollection blocks)
+    {
+        foreach (var block in blocks)
+        {
+            switch (block)
+            {
+                case Paragraph p:
+                    yield return string.Concat(p.Inlines.Select(InlineText));
+                    break;
+                case Section s:
+                    foreach (var nested in ParagraphTexts(s.Blocks)) yield return nested;
+                    break;
+            }
+        }
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

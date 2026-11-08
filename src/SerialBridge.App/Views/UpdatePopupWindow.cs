@@ -99,6 +99,7 @@ public sealed class UpdatePopupWindow : Wpf.Ui.Controls.FluentWindow
         root.Children.Add(header);
 
         // 中部：Release 正文（Markdown 渲染，可滚动、可选中复制）
+        // 说明：FlowDocumentScrollViewer 中超链接默认即可点击（IsDocumentEnabled 是 RichTextBox 的属性）。
         _notesHost = new FlowDocumentScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
