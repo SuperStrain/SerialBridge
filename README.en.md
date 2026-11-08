@@ -26,21 +26,9 @@
 
 Regular TCP clients and human-operated terminals work too. **SerialBridge is a transparent transport, not a built-in AI model or an autonomous device controller.**
 
-```text
-       AI agents / scripts / terminals
-                   │
-              TCP client
-                   │  192.168.1.100:9001
-                   ▼
-       ┌───────────────────────┐
-       │ SerialBridge (Windows)│
-       │ TCP :9001 ⇄ COM3      │
-       │ TCP :9002 ⇄ COM4      │
-       └───────────┬───────────┘
-                   │ USB / UART
-                   ▼
-          Board / MCU / Device
-```
+<div align="center">
+  <img src="docs/assets/serialbridge-agent-workflow-en.svg" alt="AI agents connect over LAN TCP to SerialBridge, which bridges the physical UART to an embedded device" width="100%" />
+</div>
 
 > **Transparent forwarding:** SerialBridge transfers raw bytes. It does not wrap connections in Telnet or another control protocol. Serial port settings are configured on the Windows host.
 
@@ -125,19 +113,44 @@ Open the mapping's **Serial Terminal** → **Quick Commands / Macros** → **Edi
 
 ## 🏗️ Architecture
 
-```text
-┌────────────────────────────────────────────────┐
-│ SerialBridge.App  ·  C# / WPF / MVVM            │
-│ Mappings · Terminal (WebView2 + xterm.js)       │
-│ Monitor · Macros · Tray · Updates               │
-└───────────────────────┬────────────────────────┘
-                        │
-┌───────────────────────▼────────────────────────┐
-│ SerialBridge.Core  ·  .NET 8                   │
-│ MappingManager / MappingRuntime                │
-│ SerialPortDevice ⇄ bounded queues ⇄ TCP server │
-│ ConfigStore · Capture · Logging                │
-└────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph APP["SerialBridge.App · C# / WPF / MVVM"]
+        direction LR
+        UI["Mappings / Settings"]
+        TERM["Serial Terminal<br/>WebView2 + xterm.js"]
+        MON["Traffic Monitor / Logs"]
+        MACRO["Quick Commands / Macros"]
+        TRAY["System Tray / Updates"]
+    end
+
+    subgraph CORE["SerialBridge.Core · .NET 8"]
+        direction TB
+        MANAGER["MappingManager<br/>Lifecycle"]
+        RUNTIME["MappingRuntime<br/>Bidirectional bridge"]
+        SERIAL["SerialPortDevice"]
+        TCP["TcpServerService"]
+        SUPPORT["ConfigStore · Capture · Logging"]
+        MANAGER --> RUNTIME
+        RUNTIME <--> SERIAL
+        RUNTIME <--> TCP
+        SUPPORT -.-> RUNTIME
+    end
+
+    UI --> MANAGER
+    TERM <--> RUNTIME
+    MON -.-> RUNTIME
+    MACRO --> RUNTIME
+    TRAY -.-> MANAGER
+    SERIAL <--> DEVICE["Physical COM / Device"]
+    TCP <--> CLIENT["LAN TCP Client / AI Agent"]
+
+    classDef app fill:#e8f0ff,stroke:#477dd6,color:#123d81
+    classDef core fill:#eff6ff,stroke:#6c97c9,color:#15375d
+    classDef edge fill:#e7f7ee,stroke:#3a9e72,color:#185c3e
+    class UI,TERM,MON,MACRO,TRAY app
+    class MANAGER,RUNTIME,SERIAL,TCP,SUPPORT core
+    class DEVICE,CLIENT edge
 ```
 
 - **Language & UI:** C#, .NET 8, WPF, WPF-UI, CommunityToolkit.Mvvm

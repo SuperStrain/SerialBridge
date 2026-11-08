@@ -26,21 +26,9 @@
 
 SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供的是透明串口通道，而不是内置 AI 模型或无需授权的自动控制系统**。
 
-```text
-   AI Agent / 调试脚本 / 开发者终端
-                  │
-             TCP 客户端
-                  │  192.168.1.100:9001
-                  ▼
-       ┌──────────────────────┐
-       │ SerialBridge (Windows)│
-       │ TCP :9001 ⇄ COM3     │
-       │ TCP :9002 ⇄ COM4     │
-       └──────────┬───────────┘
-                  │ USB / UART
-                  ▼
-          开发板 / MCU / 设备
-```
+<div align="center">
+  <img src="docs/assets/serialbridge-agent-workflow-zh.svg" alt="AI Agent 通过局域网 TCP 访问 SerialBridge，再经串口双向连接嵌入式开发板" width="100%" />
+</div>
 
 > **透明透传**：SerialBridge 转发原始字节，不将 TCP 流量包装成 Telnet 或其他控制协议。实际串口参数由 Windows 端映射配置决定。
 
@@ -125,19 +113,44 @@ picocom /tmp/ttydev
 
 ## 🏗️ 技术架构
 
-```text
-┌──────────────────────────────────────────────┐
-│ SerialBridge.App  ·  C# / WPF / MVVM          │
-│ 映射管理 · 内置终端 (WebView2 + xterm.js)     │
-│ 数据监控 · 快捷宏 · 托盘 · 更新                 │
-└──────────────────────┬───────────────────────┘
-                       │
-┌──────────────────────▼───────────────────────┐
-│ SerialBridge.Core  ·  .NET 8                 │
-│ MappingManager / MappingRuntime              │
-│ SerialPortDevice ⇄ 有界队列 ⇄ TcpServerService│
-│ ConfigStore · Capture · Logging              │
-└──────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph APP["SerialBridge.App · C# / WPF / MVVM"]
+        direction LR
+        UI["映射管理 / 设置"]
+        TERM["串口终端<br/>WebView2 + xterm.js"]
+        MON["数据监控 / 日志展示"]
+        MACRO["快捷命令 / 宏"]
+        TRAY["托盘 / 自动更新"]
+    end
+
+    subgraph CORE["SerialBridge.Core · .NET 8"]
+        direction TB
+        MANAGER["MappingManager<br/>映射与生命周期"]
+        RUNTIME["MappingRuntime<br/>双向数据转发"]
+        SERIAL["SerialPortDevice"]
+        TCP["TcpServerService"]
+        SUPPORT["ConfigStore · Capture · Logging"]
+        MANAGER --> RUNTIME
+        RUNTIME <--> SERIAL
+        RUNTIME <--> TCP
+        SUPPORT -.-> RUNTIME
+    end
+
+    UI --> MANAGER
+    TERM <--> RUNTIME
+    MON -.-> RUNTIME
+    MACRO --> RUNTIME
+    TRAY -.-> MANAGER
+    SERIAL <--> DEVICE["物理串口 / 开发板"]
+    TCP <--> CLIENT["局域网 TCP 客户端 / AI Agent"]
+
+    classDef app fill:#e8f0ff,stroke:#477dd6,color:#123d81
+    classDef core fill:#eff6ff,stroke:#6c97c9,color:#15375d
+    classDef edge fill:#e7f7ee,stroke:#3a9e72,color:#185c3e
+    class UI,TERM,MON,MACRO,TRAY app
+    class MANAGER,RUNTIME,SERIAL,TCP,SUPPORT core
+    class DEVICE,CLIENT edge
 ```
 
 - **语言与框架：** C#、.NET 8、WPF、WPF-UI、CommunityToolkit.Mvvm
