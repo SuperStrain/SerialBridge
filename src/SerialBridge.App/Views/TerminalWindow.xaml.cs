@@ -257,6 +257,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     private async Task SendPresetFromBarAsync(CommandPreset preset)
     {
         if (_lifetime.IsClosing || _commandBarCancellation is not null) return;
+        CancellationTokenSource? cancellation = null;
         try
         {
             // 冻结点击时刻的预设快照，运行期间的编辑/删除不影响本次发送。
@@ -282,7 +283,9 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
             }
 
             // 点击即发送（无确认弹窗）；多步宏可用「停止」中断后续步骤。
-            var cancellation = new CancellationTokenSource();
+            // 取消源与窗口生命周期关联：关闭终端（BeginClose）立即中止宏，
+            // 不会在窗口关闭后继续向设备发送剩余步骤。
+            cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             _commandBarCancellation = cancellation;
             SetCommandBarButtonStates(false);
             CommandBarStop.Visibility = Visibility.Visible;
@@ -304,6 +307,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         finally
         {
             _commandBarCancellation = null;
+            cancellation?.Dispose();   // 执行结束后释放取消源
             SetCommandBarButtonStates(true);
             CommandBarStop.Visibility = Visibility.Collapsed;
             RefocusTerminal();

@@ -129,13 +129,14 @@ public sealed class ConfigStore
     private static string NormalizeFormat(string? format) =>
         string.Equals(format?.Trim(), "Hex", StringComparison.OrdinalIgnoreCase) ? "Hex" : "Text";
 
-    /// <summary>换行归一化：大小写不敏感映射到 None/CR/LF/CRLF；HEX 步骤固定 None（编码器要求）。</summary>
+    /// <summary>换行归一化：大小写不敏感映射到 None/CR/LF/CRLF；HEX 步骤固定 None（编码器要求）。
+    /// null 与空串原先被编码器视为不追加换行，归一化为 None 保留该语义。</summary>
     private static string NormalizeEnding(string? ending, string format)
     {
         if (format == "Hex") return "None";
         return ending?.Trim().ToUpperInvariant() switch
         {
-            "NONE" or "" => "None",
+            "NONE" or "" or null => "None",
             "CR" => "CR",
             "LF" => "LF",
             "CRLF" => "CRLF",

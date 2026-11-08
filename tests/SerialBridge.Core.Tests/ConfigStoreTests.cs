@@ -28,7 +28,8 @@ public sealed class ConfigStoreTests
                 { "Name": "hex小写", "Steps": [ { "Format": "hex", "Content": "01 03", "Ending": "cr", "DelayMs": 0 } ] },
                 { "Name": "lf小写", "Steps": [ { "Format": "Text", "Content": "ls", "Ending": "lf", "DelayMs": 0 } ] },
                 { "Name": "未知值", "Steps": [ { "Format": "bogus", "Content": "x", "Ending": "weird", "DelayMs": 0 } ] },
-                { "Name": "空换行", "Steps": [ { "Format": "text", "Content": "x", "Ending": "", "DelayMs": 0 } ] }
+                { "Name": "空换行", "Steps": [ { "Format": "text", "Content": "x", "Ending": "", "DelayMs": 0 } ] },
+                { "Name": "null换行", "Steps": [ { "Format": "Text", "Content": "x", "Ending": null, "DelayMs": 0 } ] }
               ]
             }
             """);
@@ -37,11 +38,12 @@ public sealed class ConfigStoreTests
             var settings = new ConfigStore(path).Load();
             var steps = settings.CommandPresets.SelectMany(p => p.Steps).ToList();
 
-            // HEX 强制 None；大小写归一；未知回退 CR（串口回车标准）；空串等价 None
+            // HEX 强制 None；大小写归一；未知回退 CR（串口回车标准）；空串与 null 等价 None（编码器原语义）
             Assert.Equal(("Hex", "None"), (steps[0].Format, steps[0].Ending));
             Assert.Equal(("Text", "LF"), (steps[1].Format, steps[1].Ending));
             Assert.Equal(("Text", "CR"), (steps[2].Format, steps[2].Ending));
             Assert.Equal(("Text", "None"), (steps[3].Format, steps[3].Ending));
+            Assert.Equal(("Text", "None"), (steps[4].Format, steps[4].Ending));
         }
         finally
         {
