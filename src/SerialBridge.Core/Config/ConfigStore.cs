@@ -96,6 +96,11 @@ public sealed class ConfigStore
             p.Name = string.IsNullOrWhiteSpace(p.Name) ? "未命名命令" : p.Name.Trim();
             p.Steps ??= new List<CommandStep>();
             p.Steps = p.Steps.Where(step => step is not null).Take(100).ToList();
+            foreach (var step in p.Steps)
+            {
+                step.Format = NormalizeFormat(step.Format);
+                step.Ending = NormalizeEnding(step.Ending, step.Format);
+            }
         }
         s.Mappings ??= new List<MappingConfig>();
         var seenIds = new HashSet<Guid>();
@@ -118,6 +123,24 @@ public sealed class ConfigStore
             if (!usedPorts.Add(m.ListenPort))
                 m.ListenPort = FindFreePort(usedPorts); // 防止配置里端口重复导致启动互斥
         }
+    }
+
+    /// <summary>格式归一化：仅接受 Text/Hex（大小写不敏感），其余视为 Text。</summary>
+    private static string NormalizeFormat(string? format) =>
+        string.Equals(format?.Trim(), "Hex", StringComparison.OrdinalIgnoreCase) ? "Hex" : "Text";
+
+    /// <summary>换行归一化：大小写不敏感映射到 None/CR/LF/CRLF；HEX 步骤固定 None（编码器要求）。</summary>
+    private static string NormalizeEnding(string? ending, string format)
+    {
+        if (format == "Hex") return "None";
+        return ending?.Trim().ToUpperInvariant() switch
+        {
+            "NONE" or "" => "None",
+            "CR" => "CR",
+            "LF" => "LF",
+            "CRLF" => "CRLF",
+            _ => "CR",   // 串口控制台的回车标准
+        };
     }
 
     private static int FindFreePort(HashSet<int> used)
