@@ -1,36 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 900 333">
-  <title id="title">AI Agent 与真实设备互联</title>
-  <desc id="desc">AI Agent 通过局域网 TCP 连接 Windows 上的 SerialBridge，再经物理串口与嵌入式设备双向通信。</desc>
-  <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#F8FBFF"/><stop offset="1" stop-color="#EDF3FE"/></linearGradient>
-    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2563EB"/><stop offset="1" stop-color="#1749B7"/></linearGradient>
-    <filter id="shadow" x="-10%" y="-15%" width="130%" height="145%"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#23476D" flood-opacity=".12"/></filter>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" fill="#4D79BC"/></marker>
-  </defs>
-  <rect width="900" height="333" rx="19" fill="url(#background)"/>
-  <circle cx="854" cy="10" r="100" fill="#DEEAFE" opacity=".6"/>
-  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Arial,sans-serif">
-    <text x="28" y="44" font-size="27" font-weight="700" fill="#163863">AI Agent 与真实设备互联</text>
-    <text x="29" y="75" font-size="18" fill="#48688D">局域网 TCP 接入 · 透明串口双向传输</text>
-    <g filter="url(#shadow)"><rect x="28" y="100" width="240" height="204" rx="16" fill="#FFFFFF" stroke="#CADAF1"/><rect x="330" y="100" width="240" height="204" rx="16" fill="url(#blue)" stroke="#1D54BE"/><rect x="632" y="100" width="240" height="204" rx="16" fill="#FFFFFF" stroke="#CAE4D8"/></g>
-    <g transform="translate(49 117)" stroke="#3168D9" stroke-width="2.5" fill="none" stroke-linecap="round"><rect x="1" y="7" width="36" height="29" rx="7" fill="#E8F0FF"/><path d="M19 1v6M11 18h1M27 18h1M12 27h15"/></g>
-    <g transform="translate(352 119)" stroke="#FFFFFF" stroke-width="2.5" fill="none" stroke-linecap="round"><rect width="37" height="32" rx="7"/><path d="M9 11h19M9 21h19"/></g>
-    <g transform="translate(654 119)" stroke="#2E8A62" stroke-width="2.4" fill="none" stroke-linecap="round"><rect x="4" y="4" width="33" height="33" rx="5" fill="#E8F6EF"/><path d="M0 12h4M0 21h4M0 29h4M37 12h4M37 21h4M37 29h4M12 0v4M21 0v4M29 0v4M12 37v4M21 37v4M29 37v4"/></g>
-    <text x="48" y="203" font-size="22" font-weight="700" fill="#18345B">AI Agent / 开发者</text>
-    <text x="48" y="232" font-size="17" font-weight="500" fill="#4E6886">日志分析 · 诊断命令</text>
-    <rect x="48" y="252" width="200" height="34" rx="17" fill="#EBF2FE"/>
-    <text x="60" y="274" font-size="16" font-weight="600" fill="#2758A0">Agent · Scripts</text>
-    <text x="350" y="203" font-size="26" font-weight="700" fill="#FFFFFF">SerialBridge</text>
-    <text x="350" y="232" font-size="17" font-weight="500" fill="#E2EDFF">Windows 串口 ↔ TCP</text>
-    <rect x="350" y="252" width="200" height="34" rx="17" fill="#4F80D9"/>
-    <text x="362" y="274" font-size="16" font-weight="600" fill="#FFFFFF">TCP 9001 ↔ COM3</text>
-    <text x="652" y="203" font-size="22" font-weight="700" fill="#18345B">嵌入式设备</text>
-    <text x="652" y="232" font-size="17" font-weight="500" fill="#4E6886">串口控制台 · UART</text>
-    <rect x="652" y="252" width="200" height="34" rx="17" fill="#E8F6EF"/>
-    <text x="664" y="274" font-size="16" font-weight="600" fill="#217651">Linux · MCU</text>
-    <path d="M275 213H323" fill="none" stroke="#4D79BC" stroke-width="3" stroke-linecap="round" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <path d="M577 213H625" fill="none" stroke="#4D79BC" stroke-width="3" stroke-linecap="round" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <text x="299" y="188" text-anchor="middle" font-size="16" font-weight="700" fill="#235AA6">TCP</text>
-    <text x="601" y="188" text-anchor="middle" font-size="16" font-weight="700" fill="#235AA6">UART</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 748" width="900" height="748" role="img" aria-labelledby="title desc">
+<title id="title">AI Agent 连接真实硬件</title>
+<desc id="desc">通过局域网 TCP，让设备串口成为 Agent 可访问的调试入口. AI agents connect via LAN TCP to a Windows serial bridge, which communicates with embedded hardware over UART.</desc>
+<defs>
+<linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#F8FBFF"/><stop offset="1" stop-color="#EAF2FD"/></linearGradient>
+<linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2563EB"/><stop offset="1" stop-color="#1542AC"/></linearGradient>
+<filter id="shadow" x="-10%" y="-10%" width="125%" height="130%"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#244968" flood-opacity=".09"/></filter>
+<marker id="arrowStart" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse"><path d="M1 5L9 1L9 9Z" fill="#477ABB"/></marker>
+<marker id="arrowEnd" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><path d="M1 1L9 5L1 9Z" fill="#477ABB"/></marker>
+</defs>
+<rect width="900" height="748" rx="24" fill="url(#background)"/>
+<g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Arial,sans-serif">
+<text x="28" y="46" font-weight="750" font-size="35" fill="#14365F">AI Agent 连接真实硬件</text>
+<text x="29" y="82" font-size="20" fill="#456689">通过局域网 TCP，让设备串口成为 Agent 可访问的调试入口</text>
+<g filter="url(#shadow)"><rect x="26" y="110" width="848" height="151" rx="19" fill="#FFFFFF" stroke="#D7E5F4"/></g>
+ <rect x="57" y="143" width="53" height="48" rx="12" fill="#E7F0FF" stroke="#4A78D7" stroke-width="2"/><path d="M83 134v9M70 161h1M94 161h1M72 178h23" fill="none" stroke="#3773DE" stroke-width="2.5" stroke-linecap="round"/>
+ <text x="134" y="164" font-size="31" font-weight="750" fill="#143155">AI Agent / 开发者</text>
+ <text x="134" y="201" font-size="23" fill="#435D7C">分析启动日志 · 发送诊断命令</text>
+ <rect x="134" y="218" width="255" height="30" rx="15" fill="#E8F0FE"/>
+ <text x="149" y="239" font-size="19" font-weight="650" fill="#235BA4">Linux · Windows · Scripts</text>
+ <text x="827" y="155" font-size="31" text-anchor="end" font-weight="750" fill="#B1C9E7">01</text>
+<g filter="url(#shadow)"><rect x="26" y="315" width="848" height="151" rx="19" fill="url(#blue)" stroke="#1B51B6"/></g>
+ <rect x="57" y="348" width="53" height="48" rx="12" fill="#FFFFFF" fill-opacity=".18" stroke="#FFFFFF" stroke-width="2"/><path d="M68 364h32M68 378h32" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
+ <text x="134" y="369" font-size="31" font-weight="750" fill="#FFFFFF">SerialBridge</text>
+ <text x="134" y="406" font-size="23" fill="#E2EDFF">Windows 上的串口 ↔ TCP 透明桥接</text>
+ <rect x="134" y="423" width="255" height="30" rx="15" fill="#487BD8"/>
+ <text x="149" y="444" font-size="19" font-weight="650" fill="#FFFFFF">TCP :9001 ↔ COM3</text>
+ <text x="827" y="360" font-size="31" text-anchor="end" font-weight="750" fill="#CFE0FF">02</text>
+<g filter="url(#shadow)"><rect x="26" y="520" width="848" height="151" rx="19" fill="#FFFFFF" stroke="#D7E5F4"/></g>
+ <rect x="64" y="559" width="42" height="42" rx="7" fill="#E4F7EB" stroke="#27835B" stroke-width="2.5"/><path d="M57 569h7M57 590h7M106 569h7M106 590h7M75 552v7M96 552v7M75 601v7M96 601v7" stroke="#27835B" stroke-width="2.5" stroke-linecap="round"/>
+ <text x="134" y="574" font-size="31" font-weight="750" fill="#143155">嵌入式设备</text>
+ <text x="134" y="611" font-size="23" fill="#435D7C">通过 UART 访问开发板串口控制台</text>
+ <rect x="134" y="628" width="260" height="30" rx="15" fill="#E5F5ED"/>
+ <text x="149" y="649" font-size="19" font-weight="650" fill="#1D7850">Embedded Linux · MCU</text>
+ <text x="827" y="565" font-size="31" text-anchor="end" font-weight="750" fill="#B1C9E7">03</text>
+<path d="M450 263v48" stroke="#477ABB" stroke-width="3.7" fill="none" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
+ <rect x="488" y="272" width="230" height="31" rx="15" fill="#E4EFFC"/>
+ <text x="502" y="294" font-size="19" font-weight="700" fill="#265D9D">局域网 TCP · 双向通信</text>
+<path d="M450 468v48" stroke="#477ABB" stroke-width="3.7" fill="none" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
+ <rect x="488" y="477" width="230" height="31" rx="15" fill="#E4EFFC"/>
+ <text x="502" y="499" font-size="19" font-weight="700" fill="#265D9D">USB / UART · 双向通信</text>
+<text x="29" y="718" font-size="18" fill="#4B6687">串口参数由 Windows 端配置，SerialBridge 不内置 AI 模型。</text>
+</g>
 </svg>
