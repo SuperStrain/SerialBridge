@@ -29,9 +29,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _localIpSummary = "";
     [ObservableProperty] private bool _hasMappings;
     [ObservableProperty] private bool _firewallWarningVisible;
-    [ObservableProperty] private bool _updateBannerVisible;
-    [ObservableProperty] private string _updateBannerTitle = "";
-    [ObservableProperty] private string _updateBannerMessage = "";
+    [ObservableProperty] private bool _updateBadgeVisible;
+    [ObservableProperty] private string _updateBadgeVersion = "";
 
     public UpdateViewModel? Update { get; private set; }
     [ObservableProperty] private string _refreshedAtText = "";
@@ -39,6 +38,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _appVersion = Services.AppServices.AppVersion;
 
     private readonly DispatcherTimerEx _timer;
+    private DispatcherTimerEx _updateTimer;
 
     public MainViewModel()
     {
@@ -65,22 +65,19 @@ public partial class MainViewModel : ObservableObject
             fallbackUrlOverride: string.IsNullOrWhiteSpace(fallbackOverride) ? null : fallbackOverride);
         Update = new UpdateViewModel(updater, SkippedVersionStore.Load());
 
-        // 属性转发（横幅绑定在 MainViewModel 上）
+        // 属性转发（NEW 徽章绑定在 MainViewModel 上）
         Update.PropertyChanged += (_, e) =>
         {
             switch (e.PropertyName)
             {
-                case nameof(Update.UpdateBannerVisible): UpdateBannerVisible = Update.UpdateBannerVisible; break;
-                case nameof(Update.UpdateBannerTitle): UpdateBannerTitle = Update.UpdateBannerTitle; break;
-                case nameof(Update.UpdateBannerMessage): UpdateBannerMessage = Update.UpdateBannerMessage; break;
+                case nameof(Update.UpdateBadgeVisible): UpdateBadgeVisible = Update.UpdateBadgeVisible; break;
+                case nameof(Update.UpdateBadgeVersion): UpdateBadgeVersion = Update.UpdateBadgeVersion; break;
             }
         };
 
-        // 命令委托
-        _updateNowCommand = new AsyncRelayCommand(() => Update.UpdateNowAsync());
-        _skipVersionCommand = new RelayCommand(() => Update.SkipVersion());
-
-        // 启动后 30 秒自动检查（用户关闭开关则不查）；之后每 6 小时一次
+        // 启动 30 秒后首次静默检查；之后每 30 分钟复查一次（托盘常驻运行也能及时发现新版本）。
+        // 每次 tick 实时读取开关：用户中途关闭自动检查后立即生效。
+        _updateTimer = new DispatcherTimerEx(TimeSpan.FromMinutes(30), OnUpdateTimerTick);
         if (AppServices.Settings.General.AutoCheckUpdates)
         {
             _ = System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(async () =>
@@ -88,22 +85,26 @@ public partial class MainViewModel : ObservableObject
                 await Task.Delay(TimeSpan.FromSeconds(30));
                 LogX.Info("自动检查更新：开始");
                 var v = await Update.CheckSilentlyAsync();
-                LogX.Info($"自动检查更新：结果 {(v is null ? "无更新/失败" : "v" + v)}");
-                if (v is not null)
-                {
-                    UpdateBannerVisible = true;
-                    LogX.Info($"发现新版本 v{v}");
-                }
+                LogX.Info($"自动检查更新：结果 {(v is null ? "无更新/失败/已跳过" : "v" + v)}");
             });
         }
     }
 
-    private AsyncRelayCommand? _updateNowCommand;
-    public IAsyncRelayCommand UpdateNowCommand => _updateNowCommand ??= new AsyncRelayCommand(
-        () => Update?.UpdateNowAsync() ?? Task.CompletedTask);
-    private RelayCommand? _skipVersionCommand;
-    public IRelayCommand SkipVersionCommand => _skipVersionCommand ??= new RelayCommand(
-        () => Update?.SkipVersion());
+    private async void OnUpdateTimerTick()
+    {
+        try
+        {
+            if (!AppServices.Settings.General.AutoCheckUpdates) return;
+            LogX.Info("定时检查更新：开始");
+            var v = await Update!.CheckSilentlyAsync();
+            LogX.Info($"定时检查更新：结果 {(v is null ? "无更新/失败/已跳过" : "v" + v)}");
+        }
+        catch (Exception ex)
+        {
+            // 定时任务绝不干扰主流程
+            LogX.Warn($"定时检查更新异常：{ex.Message}");
+        }
+    }
 
     private static string BuildLocalIpSummary()
     {
@@ -216,6 +217,7 @@ public partial class MainViewModel : ObservableObject
     {
         RequestEdit -= OnRequestEdit;
         _timer.Dispose();
+        _updateTimer.Dispose();
     }
 }
 
