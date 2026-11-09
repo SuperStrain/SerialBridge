@@ -275,9 +275,18 @@ public static class ReleaseNotesRenderer
                 target.Add(new LineBreak());
                 break;
             case HtmlInline htmlInline:
-                var htmlText = StripHtml(htmlInline.ToString());
-                if (htmlText.Length > 0)
-                    target.Add(FormatRun(new Run(htmlText), weight, style, size));
+                // HtmlInline 的 HTML 文本在 Tag 属性;ToString() 返回的是类型名,不得直接输出。
+                if (htmlInline.Tag is not null &&
+                    Regex.IsMatch(htmlInline.Tag, @"^<br\s*/?>?$", RegexOptions.IgnoreCase))
+                {
+                    target.Add(new LineBreak());   // 行内 <br> 渲染为换行
+                }
+                else
+                {
+                    var htmlText = StripHtml(htmlInline.Tag ?? "");
+                    if (htmlText.Length > 0)
+                        target.Add(FormatRun(new Run(htmlText), weight, style, size));
+                }
                 break;
             default:
                 var fallback = StripHtml(inline?.ToString() ?? "");

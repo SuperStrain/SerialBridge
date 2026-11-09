@@ -81,13 +81,28 @@ public sealed class ReleaseNotesRendererTests
     }
 
     [Fact]
-    public void HtmlCommentsAndTags_AreStripped()
+    public void HtmlCommentsAndTags_AreStrippedWithoutTypeNames()
     {
-        var doc = ReleaseNotesRenderer.ToFlowDocument("A<!-- 隐藏注释 -->B\n\n<details><summary>x</summary>y</details>");
+        // 审查发现的行为回归:HtmlInline.ToString() 返回类型名,不得插入正文
+        var doc = ReleaseNotesRenderer.ToFlowDocument("A<!-- 隐藏注释 -->B");
         var texts = ParagraphTexts(doc);
 
+        Assert.Contains(texts, t => t.Contains("AB"));
         Assert.All(texts, t => Assert.DoesNotContain("<", t));
         Assert.DoesNotContain(texts, t => t.Contains("隐藏注释"));
+        Assert.DoesNotContain(texts, t => t.Contains("HtmlInline"));   // 不得把 Markdig 类型名插入正文
+    }
+
+    [Fact]
+    public void InlineBr_RendersAsLineBreak()
+    {
+        var doc = ReleaseNotesRenderer.ToFlowDocument("提示<br>请先备份");
+        var paragraph = (Paragraph)doc.Blocks.FirstBlock!;
+
+        var text = string.Concat(paragraph.Inlines.Select(InlineText));
+        Assert.Equal("提示请先备份", text);
+        Assert.Contains(paragraph.Inlines, i => i is LineBreak);
+        Assert.DoesNotContain(paragraph.Inlines, i => i is Run r && r.Text.Contains("br"));
     }
 
     [Fact]
