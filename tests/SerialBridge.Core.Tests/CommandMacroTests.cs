@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using SerialBridge.Core.Models;
 using Xunit;
@@ -103,5 +104,23 @@ public class CommandMacroTests
                 return true;
             }, cancel.Token));
         Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public async Task Macro_TrailingDelayOnSingleStep_DoesNotBlockCompletion()
+    {
+        var sent = new List<byte[]>();
+        var macro = new CommandPreset { Steps =
+        [
+            new CommandStep { Content = "uname -a", DelayMs = 5000 }
+        ] };
+        var stopwatch = Stopwatch.StartNew();
+        await CommandMacroRunner.RunAsync(macro, bytes =>
+        {
+            sent.Add(bytes); return true;
+        }, CancellationToken.None);
+        Assert.Single(sent);
+        Assert.True(stopwatch.ElapsedMilliseconds < 2000,
+            $"尾步延时没有下一步可节流，不应拖住调用方（实际等待 {stopwatch.ElapsedMilliseconds}ms）");
     }
 }
