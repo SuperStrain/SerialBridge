@@ -236,8 +236,15 @@ public sealed class CommandPaletteWindow : Window
     internal static bool DelayEditable(CommandPreset? preset, CommandStep? step) =>
         preset?.Steps is { Count: > 0 } steps && step is not null && !ReferenceEquals(steps[^1], step);
 
-    private void OnStepRowLoading(object? sender, DataGridRowEventArgs e) =>
+    private void OnStepRowLoading(object? sender, DataGridRowEventArgs e)
+    {
+        // 行回收复用时容器常驻可视树、不会再触发 Loaded：LoadingRow 时立即刷新一次
+        //（此时 row.Item 已指向新数据项；单元格未生成时刷新为空操作），
+        // Loaded 仅兜底首次实现的模板加载时序；重复订阅先去重。
+        RefreshDelayCellState(e.Row);
+        e.Row.Loaded -= OnStepRowLoaded;
         e.Row.Loaded += OnStepRowLoaded;
+    }
 
     private void OnStepRowLoaded(object sender, RoutedEventArgs e)
     {
