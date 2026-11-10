@@ -65,7 +65,7 @@ public sealed class CommandStep : System.ComponentModel.INotifyPropertyChanged
         }
     }
 
-    /// <summary>Delay after this step (0-60000ms).</summary>
+    /// <summary>Wait before the next step (0-60000ms); a delay on the final step is not awaited.</summary>
     public int DelayMs
     {
         get => _delayMs;
@@ -131,13 +131,16 @@ public static class CommandMacroRunner
 
         // Validate everything before the first byte is sent (no half-macro due to invalid HEX).
         var prepared = preset.Steps.Select(s => (Data: Encode(s), Delay: s.DelayMs)).ToArray();
-        foreach (var step in prepared)
+        for (var i = 0; i < prepared.Length; i++)
         {
+            // A step's delay paces the gap to the NEXT step, so it is awaited before
+            // that send; a trailing delay on the final step (incl. single-step presets)
+            // has nothing to pace and would only block the caller for no benefit.
+            if (i > 0 && prepared[i - 1].Delay > 0)
+                await Task.Delay(prepared[i - 1].Delay, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            if (!send(step.Data))
+            if (!send(prepared[i].Data))
                 throw new IOException("串口映射已停止或发送队列已满，宏已中止。");
-            if (step.Delay > 0)
-                await Task.Delay(step.Delay, cancellationToken).ConfigureAwait(false);
         }
     }
 }
