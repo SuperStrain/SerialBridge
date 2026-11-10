@@ -254,7 +254,9 @@ public sealed class CommandPaletteWindow : Window
     {
         if (_delayColumn is null || row.Item is not CommandStep) return;
         if (FindCellsPresenter(row) is not { } presenter) return;
-        var index = _delayColumn.DisplayIndex;
+        // 按“列集合索引”定位容器：DisplayIndex 是显示序，用户拖动列后两者不一致，
+        // 会导致禁用错误的单元格（CellsPresenter 的容器按集合顺序生成）。
+        var index = _steps.Columns.IndexOf(_delayColumn);
         if (index < 0 || index >= presenter.Items.Count ||
             presenter.ItemContainerGenerator.ContainerFromIndex(index) is not DataGridCell cell) return;
         var editable = DelayEditable(_list.SelectedItem as CommandPreset, row.Item as CommandStep);
