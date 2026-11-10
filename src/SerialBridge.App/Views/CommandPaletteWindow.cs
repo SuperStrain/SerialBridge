@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -27,6 +28,7 @@ public sealed class CommandPaletteWindow : Window
         MinHeight = 170, SelectionMode = DataGridSelectionMode.Single
     };
     private DataGridComboBoxColumn? _formatColumn;
+    private DataGridTextColumn? _delayColumn;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap };
     private CommandStep? _editingFormatStep;
     private string? _editingOriginalFormat;
@@ -143,7 +145,7 @@ public sealed class CommandPaletteWindow : Window
 
         var hint = new TextBlock
         {
-            Text = "换行 CR = 回车键（串口控制台标准）；Hex 格式换行固定为 None；单步 ≤4096 字节、≤100 步、延时 0–60000ms。",
+            Text = "换行 CR = 回车键（串口控制台标准）；Hex 格式换行固定为 None；单步 ≤4096 字节、≤100 步；延时 0–60000ms，为与下一步的间隔，最后一步不生效。",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0),
             Foreground = Brushes.DimGray
         };
@@ -173,13 +175,25 @@ public sealed class CommandPaletteWindow : Window
             Header = "延时 ms", Width = new DataGridLength(85),
             Binding = new Binding(nameof(CommandStep.DelayMs)) { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged }
         });
+        _delayColumn = (DataGridTextColumn)_steps.Columns[^1];
         // Hex 步骤不允许换行、Text 步骤通常要回车：随格式自动纠正，避免发送时报错。
         _steps.BeginningEdit += OnStepCellBeginEdit;
         _steps.CellEditEnding += OnStepCellEditEnding;
+        // 延时是「与下一步的间隔」：最后一步没有下一步，其单元格置灰禁用并提示。
+        _steps.LoadingRow += OnStepRowLoading;
     }
 
     private void OnStepCellBeginEdit(object? sender, DataGridBeginningEditEventArgs e)
     {
+        // 最后一行（含单步命令）没有下一步：延时单元格拒绝进入编辑并提示，
+        // 避免填入永远不会生效的值；已填数值保留，后续追加步骤后自动生效。
+        if (e.Column == _delayColumn && e.Row.Item is CommandStep tail &&
+            !DelayEditable(_list.SelectedItem as CommandPreset, tail))
+        {
+            e.Cancel = true;
+            _message.Text = "最后一步没有后续步骤，延时无效；如需步骤间隔，请在需要等待位置的上一步骤上配置延时。";
+            return;
+        }
         // 记录进入编辑时的原始格式：仅在格式真正变化时才纠正换行。
         if (e.Column != _formatColumn || e.Row.Item is not CommandStep step)
         {
@@ -216,6 +230,48 @@ public sealed class CommandPaletteWindow : Window
         var original = originalFormat?.Trim();
         if (string.Equals(original, format, StringComparison.OrdinalIgnoreCase)) return currentEnding;
         return string.Equals(format, "Hex", StringComparison.OrdinalIgnoreCase) ? "None" : "CR";
+    }
+
+    /// <summary>延时是「与下一步的间隔」：最后一行（含单步命令）没有下一步，其延时单元格应禁用。</summary>
+    internal static bool DelayEditable(CommandPreset? preset, CommandStep? step) =>
+        preset?.Steps is { Count: > 0 } steps && step is not null && !ReferenceEquals(steps[^1], step);
+
+    private void OnStepRowLoading(object? sender, DataGridRowEventArgs e) =>
+        e.Row.Loaded += OnStepRowLoaded;
+
+    private void OnStepRowLoaded(object sender, RoutedEventArgs e)
+    {
+        // 行模板应用完成后才能找到延时单元格；添加/删除步骤会重置 ItemsSource
+        // 重新生成行，置灰状态随之自动重算。
+        if (sender is DataGridRow row)
+        {
+            row.Loaded -= OnStepRowLoaded;
+            RefreshDelayCellState(row);
+        }
+    }
+
+    private void RefreshDelayCellState(DataGridRow row)
+    {
+        if (_delayColumn is null || row.Item is not CommandStep) return;
+        if (FindCellsPresenter(row) is not { } presenter) return;
+        var index = _delayColumn.DisplayIndex;
+        if (index < 0 || index >= presenter.Items.Count ||
+            presenter.ItemContainerGenerator.ContainerFromIndex(index) is not DataGridCell cell) return;
+        var editable = DelayEditable(_list.SelectedItem as CommandPreset, row.Item as CommandStep);
+        cell.IsEnabled = editable;
+        cell.ToolTip = editable ? null : "最后一步没有后续步骤，延时无效";
+    }
+
+    private static DataGridCellsPresenter? FindCellsPresenter(DependencyObject parent)
+    {
+        if (parent is DataGridCellsPresenter presenter) return presenter;
+        var count = VisualTreeHelper.GetChildrenCount(parent);
+        for (var i = 0; i < count; i++)
+        {
+            if (VisualTreeHelper.GetChild(parent, i) is not DependencyObject child) continue;
+            if (FindCellsPresenter(child) is { } found) return found;
+        }
+        return null;
     }
 
     private static string NormalizeFormat(string? format) =>
