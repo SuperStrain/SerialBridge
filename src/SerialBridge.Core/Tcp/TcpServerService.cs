@@ -169,6 +169,7 @@ public sealed class TcpServerService : IAsyncDisposable
     private readonly MappingConfig _config;
     private readonly ClientHistoryStore? _history;
     private readonly ConcurrentDictionary<Guid, TcpClientConnection> _clients = new();
+    private readonly object _closeGate = new();
     private CancellationTokenSource _cts = new();
 
     private TcpListener? _listener;
@@ -301,12 +302,18 @@ public sealed class TcpServerService : IAsyncDisposable
 
     private void OnConnectionClosed(TcpClientConnection conn, string reason)
     {
-        if (_clients.TryRemove(conn.Id, out _))
+        // StopAsync waits on this gate after kicking all remaining clients.
+        // A client removed from the dictionary must have queued its history
+        // end event before shutdown can dispose the SQLite writer.
+        lock (_closeGate)
         {
-            LogX.Info($"客户端已断开：{conn.RemoteEndPoint}（{reason}，当前 {_clients.Count} 个连接）");
-            _history?.RecordClosed(_config.Id, conn.Id, conn.ConnectedAtUtc, DateTime.UtcNow,
-                conn.SentBytes, conn.RecvBytes, reason);
-            ClientClosed?.Invoke(conn, reason);
+            if (_clients.TryRemove(conn.Id, out _))
+            {
+                _history?.RecordClosed(_config.Id, conn.Id, conn.ConnectedAtUtc, DateTime.UtcNow,
+                    conn.SentBytes, conn.RecvBytes, reason);
+                LogX.Info($"客户端已断开：{conn.RemoteEndPoint}（{reason}，当前 {_clients.Count} 个连接）");
+                ClientClosed?.Invoke(conn, reason);
+            }
         }
         conn.Dispose();
     }
@@ -330,7 +337,9 @@ public sealed class TcpServerService : IAsyncDisposable
         }
         foreach (var conn in _clients.Values)
             conn.Kick("服务端停止监听");
-        _clients.Clear();
+        // Also wait for close callbacks that removed their dictionary entry
+        // just before StopAsync took its snapshot.
+        lock (_closeGate) _clients.Clear();
         LogX.Info($"TCP 监听已停止：{_config.ListenIp}:{_config.ListenPort}");
     }
 
