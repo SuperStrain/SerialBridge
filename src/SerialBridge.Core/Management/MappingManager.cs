@@ -92,11 +92,11 @@ public sealed class MappingManager : IDisposable
     public async Task RemoveMappingAsync(MappingRuntime rt)
     {
         await rt.StopAsync();
-        await rt.DisposeAsync();
-        // Prevent a stopped connection's late close event from recreating history
-        // after the delete. Failure stops deletion so the UI does not report success.
+        // Keep the runtime retryable when SQLite deletion fails. Dispose only
+        // after the history transaction has completed successfully.
         if (ClientHistoryStore.Shared is { } history)
             await history.DeleteMappingAsync(rt.Config.Id);
+        await rt.DisposeAsync();
         lock (_gate) _mappings.Remove(rt);
         LogX.Info($"已删除映射「{rt.Config.Name}」");
         MappingsChanged?.Invoke();
