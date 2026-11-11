@@ -24,6 +24,10 @@ public sealed class ClientHistoryStore : IAsyncDisposable
     private readonly object _enqueueGate = new();
     private readonly HashSet<Guid> _deleted = new();
     private bool _disposed;
+    private string? _lastWriteError;
+
+    /// <summary>Last persistence failure; remains visible until restart.</summary>
+    public string? LastWriteError => Volatile.Read(ref _lastWriteError);
 
     private sealed record WriteJob(Action<SqliteConnection> Action, TaskCompletionSource<bool>? Completion);
 
@@ -230,6 +234,7 @@ public sealed class ClientHistoryStore : IAsyncDisposable
                 }
                 catch (Exception ex)
                 {
+                    Volatile.Write(ref _lastWriteError, ex.Message);
                     LogX.Error("客户端历史数据库写入失败：" + ex.Message, ex);
                     job.Completion?.TrySetException(ex);
                     // If the connection itself failed, the next job may reopen it.
