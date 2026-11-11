@@ -198,4 +198,47 @@ public sealed class ClientHistoryTests
         Assert.NotNull(row.DisconnectedAtUtc);
     }
 
+    [Fact]
+    public async Task ImmediateDisconnectsDoNotLoseSessionFinalization()
+    {
+        var file = NewDatabasePath();
+        var mapping = Guid.NewGuid();
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        await using var store = new ClientHistoryStore(file);
+        await using var server = new TcpServerService(new MappingConfig
+        {
+            Id = mapping, PortName = "COM99", ListenIp = "127.0.0.1",
+            ListenPort = port, ClientMode = ClientMode.Multi, MaxClients = 64,
+        }, store);
+        server.Start();
+
+        const int sessionCount = 32;
+        // Rapid accepts and immediate disconnects exercise the transition
+        // between task publication, RecvLoop and close finalization.
+        for (var i = 0; i < sessionCount; i++)
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, port);
+            client.Close();
+        }
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (server.TotalAccepted < sessionCount && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        Assert.Equal(sessionCount, server.TotalAccepted);
+
+        await server.StopAsync();
+        var records = await store.GetHistoryAsync(mapping);
+        Assert.Equal(sessionCount, records.Count);
+        Assert.All(records, row =>
+        {
+            Assert.NotNull(row.DisconnectedAtUtc);
+            Assert.NotNull(row.DurationMs);
+            Assert.NotNull(row.DisconnectReason);
+        });
+    }
+
 }
