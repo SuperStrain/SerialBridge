@@ -66,8 +66,22 @@ public sealed class TcpClientConnection : IDisposable
 
     internal void Start()
     {
-        _recvTask = Task.Run(() => RecvLoopAsync(_token));
-        _sendTask = Task.Run(() => SendLoopAsync(_token));
+        // Publish both task references before either loop may emit Closed.
+        // Otherwise a very fast disconnect can finalize the connection while
+        // _sendTask is still null and persist an incomplete sent-byte count.
+        var ready = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _recvTask = Task.Run(async () =>
+        {
+            await ready.Task.ConfigureAwait(false);
+            await RecvLoopAsync(_token).ConfigureAwait(false);
+        });
+        _sendTask = Task.Run(async () =>
+        {
+            await ready.Task.ConfigureAwait(false);
+            await SendLoopAsync(_token).ConfigureAwait(false);
+        });
+        ready.SetResult(true);
     }
 
     /// <summary>将串口数据排入该客户端的发送队列。队列已满（慢速客户端）时断开连接。</summary>
