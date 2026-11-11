@@ -215,20 +215,30 @@ public sealed class ClientHistoryStore : IAsyncDisposable
 
     private async Task WriterLoopAsync()
     {
-        await foreach (var job in _queue.Reader.ReadAllAsync().ConfigureAwait(false))
+        // Reuse a single SQLite connection for all queued events. Reopening it
+        // per connection event is expensive during rapid reconnect loops.
+        SqliteConnection? db = null;
+        try
         {
-            try
+            await foreach (var job in _queue.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                using var db = Open();
-                job.Action(db);
-                job.Completion?.TrySetResult(true);
-            }
-            catch (Exception ex)
-            {
-                LogX.Error("客户端历史数据库写入失败：" + ex.Message, ex);
-                job.Completion?.TrySetException(ex);
+                try
+                {
+                    db ??= Open();
+                    job.Action(db);
+                    job.Completion?.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    LogX.Error("客户端历史数据库写入失败：" + ex.Message, ex);
+                    job.Completion?.TrySetException(ex);
+                    // If the connection itself failed, the next job may reopen it.
+                    try { db?.Dispose(); } catch { }
+                    db = null;
+                }
             }
         }
+        finally { db?.Dispose(); }
     }
 
     public async ValueTask DisposeAsync()
