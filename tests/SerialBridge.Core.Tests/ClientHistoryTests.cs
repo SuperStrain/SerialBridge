@@ -1,4 +1,8 @@
 using SerialBridge.Core.History;
+using SerialBridge.Core.Tcp;
+using SerialBridge.Core.Models;
+using System.Net;
+using System.Net.Sockets;
 
 namespace SerialBridge.Core.Tests;
 
@@ -143,6 +147,55 @@ public sealed class ClientHistoryTests
             Assert.Null(row.DurationMs);
             Assert.Equal("上次运行异常中断", row.DisconnectReason);
         });
+    }
+
+    [Fact]
+    public async Task TcpServerStopFlushesFinalizedConnectionCounters()
+    {
+        var file = NewDatabasePath();
+        var mapping = Guid.NewGuid();
+        var portProbe = new TcpListener(IPAddress.Loopback, 0);
+        portProbe.Start();
+        var port = ((IPEndPoint)portProbe.LocalEndpoint).Port;
+        portProbe.Stop();
+        await using var store = new ClientHistoryStore(file);
+        var config = new MappingConfig
+        {
+            Id = mapping,
+            PortName = "COM99",
+            ListenIp = "127.0.0.1",
+            ListenPort = port,
+        };
+        await using var server = new TcpServerService(config, store);
+        server.Start();
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port);
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (server.ClientCount != 1 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        Assert.Equal(1, server.ClientCount);
+
+        var payload = new byte[32768];
+        server.Broadcast(payload);
+        var received = 0;
+        while (received < payload.Length)
+        {
+            var buffer = new byte[8192];
+            var n = await client.GetStream().ReadAsync(buffer).AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(n > 0);
+            received += n;
+        }
+        Assert.Equal(payload.Length, received);
+
+        // The send loop may not have incremented SentBytes when the socket
+        // returns the final bytes. StopAsync must wait for I/O before recording.
+        await server.StopAsync();
+        var row = Assert.Single(await store.GetHistoryAsync(mapping));
+        Assert.Equal(payload.Length, row.SentBytes);
+        Assert.Equal(0, row.ReceivedBytes);
+        Assert.Equal("服务端停止监听", row.DisconnectReason);
+        Assert.NotNull(row.DisconnectedAtUtc);
     }
 
 }
