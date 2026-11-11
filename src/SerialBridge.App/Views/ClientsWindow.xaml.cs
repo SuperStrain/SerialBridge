@@ -161,7 +161,9 @@ public sealed class ClientsViewModel : INotifyPropertyChanged
                     RecvText = MappingViewModel.FormatBytes(item.ReceivedBytes),
                     Reason = item.DisconnectReason ?? "在线",
                 });
-            HistoryStatus = $"历史记录 {History.Count} 条 · 每条映射最多保存 1000 条已结束会话 · 手动刷新";
+            HistoryStatus = store.LastWriteError is { } error
+                ? "警告：部分连接历史写入失败：" + error
+                : $"历史记录 {History.Count} 条 · 每条映射最多保存 1000 条已结束会话 · 手动刷新";
         }
         catch (Exception ex)
         {
