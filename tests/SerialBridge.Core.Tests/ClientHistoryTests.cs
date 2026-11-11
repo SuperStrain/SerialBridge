@@ -2,6 +2,10 @@ using SerialBridge.Core.History;
 
 namespace SerialBridge.Core.Tests;
 
+[CollectionDefinition("ClientHistoryExclusive", DisableParallelization = true)]
+public sealed class ClientHistoryCollection { }
+
+[Collection("ClientHistoryExclusive")]
 public sealed class ClientHistoryTests
 {
     private static string NewDatabasePath()
