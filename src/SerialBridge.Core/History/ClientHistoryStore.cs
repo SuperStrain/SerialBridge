@@ -70,6 +70,16 @@ public sealed class ClientHistoryStore : IAsyncDisposable
                   ON ClientHistory(MappingId, ConnectedAtUtc DESC, Id DESC);
                 UPDATE ClientHistory SET DisconnectReason='上次运行异常中断'
                   WHERE DisconnectedAtUtc IS NULL;
+                DELETE FROM ClientHistory WHERE Id IN (
+                    SELECT Id FROM (
+                        SELECT Id, ROW_NUMBER() OVER (
+                            PARTITION BY MappingId ORDER BY ConnectedAtUtc DESC, Id DESC
+                        ) AS ordinal
+                        FROM ClientHistory
+                        WHERE DisconnectedAtUtc IS NOT NULL
+                           OR DisconnectReason='上次运行异常中断'
+                    ) WHERE ordinal > 1000
+                );
                 """;
             create.ExecuteNonQuery();
         }
@@ -129,10 +139,10 @@ public sealed class ClientHistoryStore : IAsyncDisposable
                 prune.Transaction = transaction;
                 prune.CommandText = """
                     DELETE FROM ClientHistory
-                    WHERE MappingId=$mapping AND DisconnectedAtUtc IS NOT NULL
+                    WHERE MappingId=$mapping AND (DisconnectedAtUtc IS NOT NULL OR DisconnectReason='上次运行异常中断')
                       AND Id NOT IN (
                         SELECT Id FROM ClientHistory
-                        WHERE MappingId=$mapping AND DisconnectedAtUtc IS NOT NULL
+                        WHERE MappingId=$mapping AND (DisconnectedAtUtc IS NOT NULL OR DisconnectReason='上次运行异常中断')
                         ORDER BY ConnectedAtUtc DESC, Id DESC LIMIT $limit
                       );
                     """;
@@ -171,7 +181,14 @@ public sealed class ClientHistoryStore : IAsyncDisposable
             }, signal))) throw new InvalidOperationException("客户端历史数据库写入队列已关闭");
             completion = signal.Task;
         }
-        await completion.ConfigureAwait(false);
+        try { await completion.ConfigureAwait(false); }
+        catch
+        {
+            // A failed deletion must not permanently disable history if the
+            // user starts the same mapping again or retries deleting it.
+            lock (_enqueueGate) _deleted.Remove(mappingId);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<ClientHistoryEntry>> GetHistoryAsync(Guid mappingId)
