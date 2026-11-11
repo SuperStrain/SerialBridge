@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
 using SerialBridge.Core.Logging;
+using SerialBridge.Core.History;
 using SerialBridge.Core.Models;
 
 namespace SerialBridge.Core.Tcp;
@@ -166,6 +167,7 @@ public sealed class TcpClientConnection : IDisposable
 public sealed class TcpServerService : IAsyncDisposable
 {
     private readonly MappingConfig _config;
+    private readonly ClientHistoryStore? _history;
     private readonly ConcurrentDictionary<Guid, TcpClientConnection> _clients = new();
     private CancellationTokenSource _cts = new();
 
@@ -193,7 +195,11 @@ public sealed class TcpServerService : IAsyncDisposable
     public event Action<TcpClientConnection, byte[]>? DataFromClient;
     internal Func<TcpClientConnection, byte[], CancellationToken, ValueTask>? ReceiveFromClientAsync { get; set; }
 
-    public TcpServerService(MappingConfig config) => _config = config;
+    public TcpServerService(MappingConfig config, ClientHistoryStore? history = null)
+    {
+        _config = config;
+        _history = history ?? ClientHistoryStore.Shared;
+    }
 
     /// <summary>开始监听。端口被占用或无权限时抛异常。</summary>
     public void Start()
@@ -278,6 +284,9 @@ public sealed class TcpServerService : IAsyncDisposable
                 };
                 conn.Closed += OnConnectionClosed;
                 _clients[conn.Id] = conn;
+                // Record admission before starting reads: a very fast disconnect must not
+                // put the end event ahead of its start in the persistent writer queue.
+                _history?.RecordConnected(_config.Id, conn.Id, conn.RemoteEndPoint, conn.ConnectedAtUtc);
                 conn.Start();
                 LogX.Info($"客户端已连接：{remote}（当前 {_clients.Count}/{max}）");
                 ClientConnected?.Invoke(conn);
@@ -295,6 +304,8 @@ public sealed class TcpServerService : IAsyncDisposable
         if (_clients.TryRemove(conn.Id, out _))
         {
             LogX.Info($"客户端已断开：{conn.RemoteEndPoint}（{reason}，当前 {_clients.Count} 个连接）");
+            _history?.RecordClosed(_config.Id, conn.Id, conn.ConnectedAtUtc, DateTime.UtcNow,
+                conn.SentBytes, conn.RecvBytes, reason);
             ClientClosed?.Invoke(conn, reason);
         }
         conn.Dispose();
