@@ -199,12 +199,20 @@ public partial class MappingViewModel : ObservableObject
     private async Task DeleteAsync()
     {
         var result = MessageBox.Show(
-            $"确定删除映射「{Config.Name}」吗？\n（运行中的串口与监听端口将立即释放）",
+            $"确定删除映射「{Config.Name}」吗？\n（运行中的串口与监听端口将立即释放，且此映射的客户端连接历史将永久删除）",
             "删除映射", MessageBoxButton.YesNo, MessageBoxImage.Question,
             MessageBoxResult.No);
         if (result != MessageBoxResult.Yes) return;
-        await AppServices.Manager.RemoveMappingAsync(Runtime);
-        AppServices.SaveSettingsSafe();
+        try
+        {
+            await AppServices.Manager.RemoveMappingAsync(Runtime);
+            AppServices.SaveSettings();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"删除映射失败：{ex.Message}", "删除失败",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     public static string FormatBytes(long bytes) => bytes switch
