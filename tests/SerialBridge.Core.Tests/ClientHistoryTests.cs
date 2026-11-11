@@ -121,4 +121,28 @@ public sealed class ClientHistoryTests
         Assert.Equal("first", row.DisconnectReason);
         Assert.Equal(10, row.SentBytes);
     }
+    [Fact]
+    public async Task RecoveredInterruptedSessionsCountTowardRetentionLimit()
+    {
+        var file = NewDatabasePath();
+        var mapping = Guid.NewGuid();
+        var start = DateTime.UtcNow.AddDays(-1);
+        await using (var store = new ClientHistoryStore(file))
+        {
+            for (int i = 0; i < 1003; i++)
+                store.RecordConnected(mapping, Guid.NewGuid(), "interrupted", start.AddSeconds(i));
+            await store.FlushAsync();
+        }
+
+        await using var reopened = new ClientHistoryStore(file);
+        var rows = await reopened.GetHistoryAsync(mapping);
+        Assert.Equal(1000, rows.Count);
+        Assert.All(rows, row =>
+        {
+            Assert.Null(row.DisconnectedAtUtc);
+            Assert.Null(row.DurationMs);
+            Assert.Equal("上次运行异常中断", row.DisconnectReason);
+        });
+    }
+
 }
