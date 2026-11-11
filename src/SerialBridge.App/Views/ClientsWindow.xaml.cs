@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Threading;
+using System.Windows.Controls;
 using SerialBridge.App.ViewModels;
 using SerialBridge.Core.Bridge;
 using SerialBridge.Core.History;
@@ -25,6 +26,13 @@ public partial class ClientsWindow : FluentWindow
         var window = new ClientsWindow(runtime);
         OpenWindows[runtime.Config.Id] = window;
         window.Show();
+    }
+
+    private void OnClientTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Source, ClientTabs)) return;
+        if (_viewModel is not null)
+            _viewModel.ShowHistory = ClientTabs.SelectedIndex == 1;
     }
 
     public ClientsWindow(MappingRuntime runtime)
