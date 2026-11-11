@@ -1,5 +1,6 @@
 using SerialBridge.Core.Bridge;
 using SerialBridge.Core.Logging;
+using SerialBridge.Core.History;
 using SerialBridge.Core.Models;
 
 namespace SerialBridge.Core.Management;
@@ -92,6 +93,10 @@ public sealed class MappingManager : IDisposable
     {
         await rt.StopAsync();
         await rt.DisposeAsync();
+        // Prevent a stopped connection's late close event from recreating history
+        // after the delete. Failure stops deletion so the UI does not report success.
+        if (ClientHistoryStore.Shared is { } history)
+            await history.DeleteMappingAsync(rt.Config.Id);
         lock (_gate) _mappings.Remove(rt);
         LogX.Info($"已删除映射「{rt.Config.Name}」");
         MappingsChanged?.Invoke();
