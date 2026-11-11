@@ -1,8 +1,10 @@
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using SerialBridge.Core.Bridge;
 using SerialBridge.Core.Config;
 using SerialBridge.Core.Logging;
+using SerialBridge.Core.History;
 using SerialBridge.Core.Management;
 using SerialBridge.Core.Models;
 
@@ -34,6 +36,15 @@ public static class AppServices
     {
         if (_initialized) return;
         LogService.Initialize();
+        try
+        {
+            ClientHistoryStore.ConfigureShared(Path.Combine(LogService.AppDataDir, "client-history.db"));
+        }
+        catch (Exception ex)
+        {
+            // History is optional for networking: failure must not stop normal bridging.
+            LogX.Error("客户端历史数据库初始化失败，连接历史不可用：" + ex.Message, ex);
+        }
         ConfigStore = new ConfigStore();
         Settings = ConfigStore.Load();
         Manager = new MappingManager();
@@ -113,6 +124,11 @@ public static class AppServices
         }
         finally
         {
+            if (ClientHistoryStore.Shared is { } history)
+            {
+                try { await history.DisposeAsync(); }
+                catch (Exception ex) { LogX.Error("客户端历史数据库退出清理失败：" + ex.Message, ex); }
+            }
             LogService.Shutdown();
         }
     }

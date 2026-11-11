@@ -4,8 +4,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     Title="客户端详情"
-    Width="720" Height="480"
-    MinWidth="600" MinHeight="360"
+    Width="900" Height="530"
+    MinWidth="720" MinHeight="400"
     WindowStartupLocation="CenterOwner"
     ResizeMode="CanResize"
     ExtendsContentIntoTitleBar="True"
@@ -39,45 +39,62 @@
             </StackPanel>
         </Border>
 
-        <!-- 客户端列表 -->
-        <Border Grid.Row="2" Margin="20,0,20,8"
-                Background="{DynamicResource ControlFillColorDefaultBrush}"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1" CornerRadius="8" ClipToBounds="True">
-            <Grid>
-                <ListView ItemsSource="{Binding Clients}"
-                          BorderThickness="0" Background="Transparent"
-                          ScrollViewer.VerticalScrollBarVisibility="Auto"
-                          VirtualizingPanel.IsVirtualizing="True">
-                    <ListView.View>
-                        <GridView>
-                            <GridViewColumn Header="远程地址" Width="200"
-                                            DisplayMemberBinding="{Binding Remote}" />
-                            <GridViewColumn Header="连接时间" Width="160"
-                                            DisplayMemberBinding="{Binding ConnectedAtText}" />
-                            <GridViewColumn Header="已连接时长" Width="120"
-                                            DisplayMemberBinding="{Binding DurationText}" />
-                            <GridViewColumn Header="已发送（设备→客户端）" Width="160"
-                                            DisplayMemberBinding="{Binding SentText}" />
-                            <GridViewColumn Header="已接收（客户端→设备）" Width="160"
-                                            DisplayMemberBinding="{Binding RecvText}" />
-                        </GridView>
-                    </ListView.View>
-                </ListView>
-
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
-                            Visibility="{Binding HasClients, Converter={StaticResource InverseBoolToVisibility}}">
-                    <ui:SymbolIcon Symbol="PeopleTeam24" FontSize="30"
-                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="当前没有客户端连接" Margin="0,10,0,0" FontSize="13.5"
-                               HorizontalAlignment="Center"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Text="局域网设备连接后此处会显示实时详情（含历史接入计数）" Margin="0,4,0,0" FontSize="12"
-                               HorizontalAlignment="Center"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                </StackPanel>
-            </Grid>
-        </Border>
+        <!-- Current and persisted history are separate views; only the latter reads SQLite. -->
+        <TabControl Grid.Row="2" x:Name="ClientTabs" Margin="20,0,20,8"
+                    SelectionChanged="OnClientTabSelectionChanged">
+            <TabItem Header="当前连接">
+                <Grid>
+                    <ListView ItemsSource="{Binding Clients}" BorderThickness="0"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto"
+                              VirtualizingPanel.IsVirtualizing="True">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="远程地址" Width="175" DisplayMemberBinding="{Binding Remote}" />
+                                <GridViewColumn Header="连接时间" Width="90" DisplayMemberBinding="{Binding ConnectedAtText}" />
+                                <GridViewColumn Header="已连接时长" Width="105" DisplayMemberBinding="{Binding DurationText}" />
+                                <GridViewColumn Header="发送（设备→客户端）" Width="145" DisplayMemberBinding="{Binding SentText}" />
+                                <GridViewColumn Header="接收（客户端→设备）" Width="145" DisplayMemberBinding="{Binding RecvText}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                IsHitTestVisible="False"
+                                Visibility="{Binding HasClients, Converter={StaticResource InverseBoolToVisibility}}">
+                        <ui:SymbolIcon Symbol="PeopleTeam24" FontSize="30" HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        <TextBlock Text="当前没有客户端连接" Margin="0,10,0,0" FontSize="13.5"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="切换到「历史连接」可查看已经断开的会话" Margin="0,4,0,0"
+                                   FontSize="12" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+            <TabItem Header="历史连接">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="6,6,6,8">
+                        <Button Content="刷新历史" Padding="10,4"
+                                Command="{Binding RefreshHistoryCommand}" />
+                        <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
+                                   FontSize="12" Text="{Binding HistoryStatus}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ListView ItemsSource="{Binding History}" BorderThickness="0"
+                              ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                              VirtualizingPanel.IsVirtualizing="True">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="远程地址" Width="185" DisplayMemberBinding="{Binding Remote}" />
+                                <GridViewColumn Header="连接时间" Width="145" DisplayMemberBinding="{Binding ConnectedAtText}" />
+                                <GridViewColumn Header="断开时间" Width="175" DisplayMemberBinding="{Binding DisconnectedAtText}" />
+                                <GridViewColumn Header="时长" Width="95" DisplayMemberBinding="{Binding DurationText}" />
+                                <GridViewColumn Header="已发送" Width="85" DisplayMemberBinding="{Binding SentText}" />
+                                <GridViewColumn Header="已接收" Width="85" DisplayMemberBinding="{Binding RecvText}" />
+                                <GridViewColumn Header="断开原因" Width="175" DisplayMemberBinding="{Binding Reason}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
 
         <!-- 底部说明 -->
         <Border Grid.Row="3" Margin="20,0,20,14" Padding="14,8"
@@ -86,7 +103,7 @@
                 BorderThickness="1" CornerRadius="8">
             <TextBlock FontSize="12" TextWrapping="Wrap"
                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                       Text="“已发送”为该连接建立后收到的设备数据量；“已接收”为该连接发送到设备的数据量。客户端断开后从列表移除；单客户端模式下被拒绝的新连接不计入列表与累计接入。" />
+                       Text="“已发送”为设备→客户端，“已接收”为客户端→设备。历史数据持久化到 SQLite，每条映射保留最近 1000 条已结束会话；删除映射时同时删除其历史。被拒绝的连接不计入历史与累计接入。" />
         </Border>
     </Grid>
 </ui:FluentWindow>

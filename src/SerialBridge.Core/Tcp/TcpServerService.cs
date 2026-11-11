@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
 using SerialBridge.Core.Logging;
+using SerialBridge.Core.History;
 using SerialBridge.Core.Models;
 
 namespace SerialBridge.Core.Tcp;
@@ -28,6 +29,11 @@ public sealed class TcpClientConnection : IDisposable
     private Task? _recvTask;
     private Task? _sendTask;
 
+    private int _closeSignaled;
+    private readonly TaskCompletionSource<bool> _finalized =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task Finalized => _finalized.Task;
+    internal void MarkFinalized() => _finalized.TrySetResult(true);
     private long _sentBytes;
     private long _recvBytes;
 
@@ -60,8 +66,22 @@ public sealed class TcpClientConnection : IDisposable
 
     internal void Start()
     {
-        _recvTask = Task.Run(() => RecvLoopAsync(_token));
-        _sendTask = Task.Run(() => SendLoopAsync(_token));
+        // Publish both task references before either loop may emit Closed.
+        // Otherwise a very fast disconnect can finalize the connection while
+        // _sendTask is still null and persist an incomplete sent-byte count.
+        var ready = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _recvTask = Task.Run(async () =>
+        {
+            await ready.Task.ConfigureAwait(false);
+            await RecvLoopAsync(_token).ConfigureAwait(false);
+        });
+        _sendTask = Task.Run(async () =>
+        {
+            await ready.Task.ConfigureAwait(false);
+            await SendLoopAsync(_token).ConfigureAwait(false);
+        });
+        ready.SetResult(true);
     }
 
     /// <summary>将串口数据排入该客户端的发送队列。队列已满（慢速客户端）时断开连接。</summary>
@@ -75,15 +95,38 @@ public sealed class TcpClientConnection : IDisposable
     }
 
     /// <summary>服务端主动断开该客户端。</summary>
-    public void Kick(string reason)
+    public void Kick(string reason) => SignalClosed(reason);
+
+    /// <summary>
+    /// Signal closure exactly once. A synchronous event handler must not await
+    /// the receive task here: the signal can originate from that same task.
+    /// </summary>
+    private void SignalClosed(string reason)
     {
+        if (Interlocked.Exchange(ref _closeSignaled, 1) != 0) return;
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { }
+        try { _client.Close(); } catch { }
+        Closed?.Invoke(this, reason);
+    }
+
+    /// <summary>Wait for all I/O to finish before reading the final byte counters.</summary>
+    internal async Task WaitForIoCompletionAsync()
+    {
+        var receive = _recvTask;
+        var send = _sendTask;
         try
         {
-            _cts.Cancel();
-            _client.Close();
+            if (receive is not null && send is not null)
+                await Task.WhenAll(receive, send).ConfigureAwait(false);
+            else if (receive is not null)
+                await receive.ConfigureAwait(false);
+            else if (send is not null)
+                await send.ConfigureAwait(false);
         }
-        catch { /* 关闭时的异常忽略 */ }
-        Closed?.Invoke(this, reason);
+        catch (Exception ex)
+        {
+            LogX.Warn($"客户端 {RemoteEndPoint} 收尾任务异常：{ex.Message}");
+        }
     }
 
     private async Task RecvLoopAsync(CancellationToken ct)
@@ -97,7 +140,7 @@ public sealed class TcpClientConnection : IDisposable
                 ct.ThrowIfCancellationRequested();
                 if (n <= 0)
                 {
-                    Closed?.Invoke(this, "客户端主动断开");
+                    SignalClosed("客户端主动断开");
                     return;
                 }
                 var chunk = buffer.AsSpan(0, n).ToArray();
@@ -110,20 +153,20 @@ public sealed class TcpClientConnection : IDisposable
         catch (OperationCanceledException) { }
         catch (IOException)
         {
-            Closed?.Invoke(this, "连接异常断开");
+            SignalClosed("连接异常断开");
         }
         catch (ObjectDisposedException)
         {
-            Closed?.Invoke(this, "连接已关闭");
+            SignalClosed("连接已关闭");
         }
         catch (SocketException ex)
         {
-            Closed?.Invoke(this, $"网络错误：{ex.SocketErrorCode}");
+            SignalClosed($"网络错误：{ex.SocketErrorCode}");
         }
         catch (Exception ex)
         {
             LogX.Error($"客户端 {RemoteEndPoint} 接收异常：{ex.Message}", ex);
-            Closed?.Invoke(this, "接收异常");
+            SignalClosed("接收异常");
         }
     }
 
@@ -138,12 +181,13 @@ public sealed class TcpClientConnection : IDisposable
             }
         }
         catch (OperationCanceledException) { }
-        catch (IOException) { /* 对端断开，RecvLoop 会报告关闭原因 */ }
-        catch (ObjectDisposedException) { }
-        catch (SocketException) { }
+        catch (IOException) { SignalClosed("发送连接异常"); }
+        catch (ObjectDisposedException) { SignalClosed("发送连接已关闭"); }
+        catch (SocketException ex) { SignalClosed($"发送网络错误：{ex.SocketErrorCode}"); }
         catch (Exception ex)
         {
             LogX.Error($"客户端 {RemoteEndPoint} 发送异常：{ex.Message}", ex);
+            SignalClosed("发送异常");
         }
     }
 
@@ -166,7 +210,10 @@ public sealed class TcpClientConnection : IDisposable
 public sealed class TcpServerService : IAsyncDisposable
 {
     private readonly MappingConfig _config;
+    private readonly ClientHistoryStore? _history;
     private readonly ConcurrentDictionary<Guid, TcpClientConnection> _clients = new();
+    private readonly object _closeGate = new();
+    private readonly Dictionary<Guid, Task> _closingTasks = new();
     private CancellationTokenSource _cts = new();
 
     private TcpListener? _listener;
@@ -193,7 +240,11 @@ public sealed class TcpServerService : IAsyncDisposable
     public event Action<TcpClientConnection, byte[]>? DataFromClient;
     internal Func<TcpClientConnection, byte[], CancellationToken, ValueTask>? ReceiveFromClientAsync { get; set; }
 
-    public TcpServerService(MappingConfig config) => _config = config;
+    public TcpServerService(MappingConfig config, ClientHistoryStore? history = null)
+    {
+        _config = config;
+        _history = history ?? ClientHistoryStore.Shared;
+    }
 
     /// <summary>开始监听。端口被占用或无权限时抛异常。</summary>
     public void Start()
@@ -278,6 +329,9 @@ public sealed class TcpServerService : IAsyncDisposable
                 };
                 conn.Closed += OnConnectionClosed;
                 _clients[conn.Id] = conn;
+                // Record admission before starting reads: a very fast disconnect must not
+                // put the end event ahead of its start in the persistent writer queue.
+                _history?.RecordConnected(_config.Id, conn.Id, conn.RemoteEndPoint, conn.ConnectedAtUtc);
                 conn.Start();
                 LogX.Info($"客户端已连接：{remote}（当前 {_clients.Count}/{max}）");
                 ClientConnected?.Invoke(conn);
@@ -292,12 +346,42 @@ public sealed class TcpServerService : IAsyncDisposable
 
     private void OnConnectionClosed(TcpClientConnection conn, string reason)
     {
-        if (_clients.TryRemove(conn.Id, out _))
+        lock (_closeGate)
         {
+            if (!_clients.TryRemove(conn.Id, out _)) return;
+            // Schedule asynchronously: Closed can fire from RecvLoopAsync itself,
+            // so awaiting its completion inside this callback would deadlock.
+            var finish = FinalizeConnectionAsync(conn, reason);
+            _closingTasks[conn.Id] = finish;
+            _ = finish.ContinueWith(_ =>
+            {
+                lock (_closeGate) _closingTasks.Remove(conn.Id);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
+
+    private async Task FinalizeConnectionAsync(TcpClientConnection conn, string reason)
+    {
+        try
+        {
+            await conn.WaitForIoCompletionAsync().ConfigureAwait(false);
+            // Only finalized counters may be persisted; SendLoop can complete
+            // a successful WriteAsync after the close signal was raised.
+            _history?.RecordClosed(_config.Id, conn.Id, conn.ConnectedAtUtc,
+                DateTime.UtcNow, conn.SentBytes, conn.RecvBytes, reason);
             LogX.Info($"客户端已断开：{conn.RemoteEndPoint}（{reason}，当前 {_clients.Count} 个连接）");
             ClientClosed?.Invoke(conn, reason);
         }
-        conn.Dispose();
+        catch (Exception ex)
+        {
+            LogX.Error($"客户端 {conn.RemoteEndPoint} 收尾异常：{ex.Message}", ex);
+        }
+        finally
+        {
+            conn.Dispose();
+            conn.MarkFinalized();
+        }
     }
 
     /// <summary>将串口收到的数据广播给所有客户端（多客户端）或发送给唯一客户端（单客户端）。</summary>
@@ -317,9 +401,22 @@ public sealed class TcpServerService : IAsyncDisposable
         {
             try { await _acceptTask.ConfigureAwait(false); } catch { }
         }
-        foreach (var conn in _clients.Values)
-            conn.Kick("服务端停止监听");
-        _clients.Clear();
+        // No more accepts can occur after the accept loop has finished.
+        // Capture both active connections and already-started close tasks;
+        // await their I/O completion before the history writer is disposed.
+        Task[] closing;
+        lock (_closeGate)
+        {
+            var active = _clients.Values.ToArray();
+            foreach (var conn in active)
+                conn.Kick("服务端停止监听");
+            // A connection may already be signaled but its Closed callback
+            // is blocked waiting to acquire _closeGate. Waiting on its own
+            // completion barrier prevents premature SQLite writer shutdown.
+            closing = active.Select(conn => conn.Finalized)
+                .Concat(_closingTasks.Values).ToArray();
+        }
+        await Task.WhenAll(closing).ConfigureAwait(false);
         LogX.Info($"TCP 监听已停止：{_config.ListenIp}:{_config.ListenPort}");
     }
 
