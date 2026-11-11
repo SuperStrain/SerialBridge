@@ -30,6 +30,10 @@ public sealed class TcpClientConnection : IDisposable
     private Task? _sendTask;
 
     private int _closeSignaled;
+    private readonly TaskCompletionSource<bool> _finalized =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task Finalized => _finalized.Task;
+    internal void MarkFinalized() => _finalized.TrySetResult(true);
     private long _sentBytes;
     private long _recvBytes;
 
@@ -359,7 +363,11 @@ public sealed class TcpServerService : IAsyncDisposable
         {
             LogX.Error($"客户端 {conn.RemoteEndPoint} 收尾异常：{ex.Message}", ex);
         }
-        finally { conn.Dispose(); }
+        finally
+        {
+            conn.Dispose();
+            conn.MarkFinalized();
+        }
     }
 
     /// <summary>将串口收到的数据广播给所有客户端（多客户端）或发送给唯一客户端（单客户端）。</summary>
@@ -385,9 +393,14 @@ public sealed class TcpServerService : IAsyncDisposable
         Task[] closing;
         lock (_closeGate)
         {
-            foreach (var conn in _clients.Values)
+            var active = _clients.Values.ToArray();
+            foreach (var conn in active)
                 conn.Kick("服务端停止监听");
-            closing = _closingTasks.Values.ToArray();
+            // A connection may already be signaled but its Closed callback
+            // is blocked waiting to acquire _closeGate. Waiting on its own
+            // completion barrier prevents premature SQLite writer shutdown.
+            closing = active.Select(conn => conn.Finalized)
+                .Concat(_closingTasks.Values).ToArray();
         }
         await Task.WhenAll(closing).ConfigureAwait(false);
         LogX.Info($"TCP 监听已停止：{_config.ListenIp}:{_config.ListenPort}");
