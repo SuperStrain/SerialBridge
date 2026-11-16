@@ -26,6 +26,7 @@ public static class AppServices
     private static readonly object _saveGate = new();
     private static readonly object _shutdownGate = new();
     private static Task? _shutdownTask;
+    private static LanDiscoverySwitch? _discoverySwitch;
 
     public static AppSettings Settings { get; private set; } = new();
     public static ConfigStore ConfigStore { get; private set; } = new();
@@ -54,6 +55,13 @@ public static class AppServices
         Remotes = new RemoteConnectionManager();
         Discovery = new LanDiscoveryResponder(() => Manager.Mappings
             .Where(m => m.Tcp.IsListening).Select(m => m.Config).ToArray(), Settings.DiscoveryDeviceId);
+        _discoverySwitch = new LanDiscoverySwitch(
+            Discovery.Start, Discovery.StopAsync,
+            enabled =>
+            {
+                Settings.General.AllowLanDiscovery = enabled;
+                SaveSettingsSafe();
+            });
         if (Settings.General.AllowLanDiscovery)
         {
             try { Discovery.Start(); }
@@ -101,14 +109,8 @@ public static class AppServices
         catch (Exception ex) { LogX.Warn("远程设备自动连接失败：" + ex.Message); }
     }
 
-    public static async Task SetLanDiscoveryEnabledAsync(bool enabled)
-    {
-        if (Discovery is null) return;
-        if (enabled) Discovery.Start();
-        else await Discovery.StopAsync();
-        Settings.General.AllowLanDiscovery = enabled;
-        SaveSettingsSafe();
-    }
+    public static Task SetLanDiscoveryEnabledAsync(bool enabled) =>
+        _discoverySwitch?.SetEnabledAsync(enabled) ?? Task.CompletedTask;
 
     /// <summary>保存全部配置（映射列表 + 偏好）。</summary>
     public static void SaveSettings()
@@ -156,7 +158,11 @@ public static class AppServices
             // save (or stop) must not prevent the remaining cleanup stages.
             await ShutdownCleanup.RunAsync(
                 SaveSettings,
-                async () => { if (Discovery is not null) await Discovery.DisposeAsync(); },
+                async () =>
+                {
+                    if (_discoverySwitch is not null) await _discoverySwitch.StopForShutdownAsync();
+                    if (Discovery is not null) await Discovery.DisposeAsync();
+                },
                 () => Remotes.DisposeAsync().AsTask(),
                 () => Manager.StopAllAsync(),
                 ex => LogX.Error("退出清理异常：" + ex.Message, ex));
