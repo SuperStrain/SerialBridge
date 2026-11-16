@@ -18,9 +18,11 @@ public sealed class RemoteTcpSession : IAsyncDisposable
     private long _sent, _received;
     private int _generation;
     private bool _disposed;
+    private string _lastDisconnectReason = "未连接";
 
     public RemoteConnectionConfig Config { get; }
     public bool IsConnected => _connected;
+    public string LastDisconnectReason => _lastDisconnectReason;
     public long SentBytes => Interlocked.Read(ref _sent);
     public long ReceivedBytes => Interlocked.Read(ref _received);
     public event Action<byte[]>? DataReceived;
@@ -52,6 +54,7 @@ public sealed class RemoteTcpSession : IAsyncDisposable
                 _cancel = cancel;
                 _output = output;
                 _connected = true;
+                _lastDisconnectReason = "";
                 var generation = ++_generation;
                 _worker = RunAsync(client, output, cancel, generation);
                 StatusChanged?.Invoke();
@@ -111,6 +114,7 @@ public sealed class RemoteTcpSession : IAsyncDisposable
             if (generation == Volatile.Read(ref _generation))
             {
                 _connected = false;
+                _lastDisconnectReason = reason;
                 StatusChanged?.Invoke();
                 ConnectionLost?.Invoke(reason);
             }
@@ -130,19 +134,21 @@ public sealed class RemoteTcpSession : IAsyncDisposable
     public async Task DisconnectAsync()
     {
         Task? worker;
+        CancellationTokenSource? cancellation;
         await _lifecycle.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_cancel is null) return;
             _connected = false;
-            _cancel.Cancel();
+            ++_generation; // suppress late stale close notifications while deliberately stopping
+            cancellation = _cancel;
+            cancellation.Cancel();
             _output?.Writer.TryComplete();
             _client?.Dispose();
             worker = _worker;
             _worker = null;
             _client = null;
             _output = null;
-            _cancel.Dispose();
             _cancel = null;
             StatusChanged?.Invoke();
         }
@@ -150,6 +156,7 @@ public sealed class RemoteTcpSession : IAsyncDisposable
         if (worker is not null)
             try { await worker.ConfigureAwait(false); }
             catch (OperationCanceledException) { }
+        cancellation?.Dispose();
     }
 
     public async ValueTask DisposeAsync()
