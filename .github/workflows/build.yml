@@ -43,6 +43,8 @@ jobs:
           persist-credentials: false
       - name: Verify release eligibility policy
         run: python3 -m unittest discover -s tests -p test_release_eligibility.py -v
+      - name: Validate Chinese release notes generator
+        run: python3 -m unittest discover -s tests -p test_release_notes.py -v
       - name: Determine release eligibility and version
         id: check
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only') }}
@@ -217,6 +219,19 @@ jobs:
             }
           } finally { $zip.Dispose() }
 
+      - name: Generate Chinese release notes
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only') || startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/generate_release_notes.py --tag "v${{ steps.version.outputs.version }}" --output dist/release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw '生成中文发布说明失败' }
+          if (!(Test-Path dist/release-notes.md) -or (Get-Item dist/release-notes.md).Length -eq 0) {
+            throw '中文发布说明为空'
+          }
+
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -266,7 +281,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber
           } else {
-            gh release create $tag $installer $portable --verify-tag --generate-notes --title $tag
+            gh release create $tag $installer $portable --verify-tag --notes-file dist/release-notes.md --title "SerialBridge $tag"
           }
           if ($LASTEXITCODE -ne 0) { throw 'GitHub Release publication failed' }
 
@@ -285,6 +300,6 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber
           } else {
-            gh release create $tag $installer $portable --verify-tag --generate-notes --title $tag
+            gh release create $tag $installer $portable --verify-tag --notes-file dist/release-notes.md --title "SerialBridge $tag"
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
