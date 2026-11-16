@@ -102,6 +102,17 @@ public sealed class ConfigStore
                 step.Ending = NormalizeEnding(step.Ending, step.Format);
             }
         }
+        s.RemoteConnections ??= new List<RemoteConnectionConfig>();
+        s.DiscoveryDeviceId = s.DiscoveryDeviceId == Guid.Empty ? Guid.NewGuid() : s.DiscoveryDeviceId;
+        var remoteIds = new HashSet<Guid>();
+        s.RemoteConnections = s.RemoteConnections.Where(c => c is not null).Take(200).ToList();
+        foreach (var c in s.RemoteConnections)
+        {
+            if (c.Id == Guid.Empty || !remoteIds.Add(c.Id)) c.Id = Guid.NewGuid();
+            c.Name = string.IsNullOrWhiteSpace(c.Name) ? "远程设备" : c.Name.Trim();
+            c.Host = string.IsNullOrWhiteSpace(c.Host) ? "127.0.0.1" : c.Host.Trim();
+            if (c.Port is < 1 or > 65535) c.Port = 9001;
+        }
         s.Mappings ??= new List<MappingConfig>();
         var seenIds = new HashSet<Guid>();
         var usedPorts = new HashSet<int>();
