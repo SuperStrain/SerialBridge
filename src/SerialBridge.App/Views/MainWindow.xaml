@@ -53,7 +53,7 @@
                         <ColumnDefinition Width="0.85*" MinWidth="72" />
                         <ColumnDefinition Width="1.4*" MinWidth="100" />
                         <ColumnDefinition Width="1.1*" MinWidth="96" />
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="170" />
                     </Grid.ColumnDefinitions>
                     <Border Grid.Column="0" Width="4" HorizontalAlignment="Left" CornerRadius="3"
                             Background="{Binding StateBrush, Converter={StaticResource StringToBrush}}" />
@@ -118,7 +118,7 @@
                                    ToolTip="启动或停止当前映射">
                             <ui:SymbolIcon Symbol="RecordStop24" FontSize="16" />
                         </ui:Button>
-                        <ui:Button Margin="5,0,0,0" Padding="9,6" ToolTip="更多映射操作">
+                        <ui:Button Margin="5,0,0,0" Padding="9,6" ToolTip="更多映射操作" Click="OnMappingMoreClick">
                             <ui:SymbolIcon Symbol="MoreHorizontal24" FontSize="16" />
                             <ui:Button.ContextMenu>
                                 <ContextMenu>
@@ -154,7 +154,7 @@
             <!-- 左侧导航：不重复放置远程连接、设置入口。 -->
             <Border Grid.Column="0" Background="{DynamicResource ControlFillColorSecondaryBrush}"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
-                <DockPanel Margin="15,20,15,14" LastChildFill="True">
+                <DockPanel Margin="15,20,15,14" LastChildFill="False">
                     <StackPanel DockPanel.Dock="Top">
                         <StackPanel Orientation="Horizontal" Margin="3,2,0,25">
                             <Image Width="44" Height="44" Source="pack://application:,,,/Assets/app-logo.png"
@@ -357,7 +357,7 @@
                                         <ColumnDefinition Width="0.85*" MinWidth="72" />
                                         <ColumnDefinition Width="1.4*" MinWidth="100" />
                                         <ColumnDefinition Width="1.1*" MinWidth="96" />
-                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="170" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="1" Text="映射名称" Margin="10,0,0,0" FontWeight="SemiBold" />
                                     <TextBlock Grid.Column="2" Text="串口配置" Margin="4,0,0,0" FontWeight="SemiBold" />
