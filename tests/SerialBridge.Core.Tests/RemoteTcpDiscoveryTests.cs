@@ -241,6 +241,32 @@ public sealed class RemoteTcpDiscoveryTests
     }
 
     [Fact]
+    public async Task RemoteManager_UnreachableHostDoesNotBlockIndependentLocalTarget()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            await using var manager = new SerialBridge.Core.Management.RemoteConnectionManager();
+            var slow = manager.Add(new RemoteConnectionConfig
+            { Name = "不可达设备", Host = "192.0.2.1", Port = 65534 });
+            var fast = manager.Add(new RemoteConnectionConfig
+            { Name = "本机模拟设备", Host = "127.0.0.1", Port = port });
+            // Do not await the unreachable address first.
+            var slowAttempt = manager.ConnectAsync(slow);
+            await manager.ConnectAsync(fast).WaitAsync(TimeSpan.FromSeconds(4));
+            using var peer = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(4));
+            Assert.True(fast.IsConnected);
+            await manager.DisconnectAsync(slow);
+            try { await slowAttempt; }
+            catch (Exception) { /* expected timeout/cancellation */ }
+            await manager.DisconnectAsync(fast);
+        }
+        finally { listener.Stop(); }
+    }
+
+    [Fact]
     public async Task RemoteManager_EditingConnectionDisconnectsOldHostBeforeChangingTarget()
     {
         var first = new TcpListener(IPAddress.Loopback, 0);
