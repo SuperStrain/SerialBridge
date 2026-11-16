@@ -32,6 +32,7 @@ public partial class MappingViewModel : ObservableObject
     // ---------- 可绑定状态 ----------
 
     [ObservableProperty] private string _name = "";
+    [ObservableProperty] private string _portName = "";
     [ObservableProperty] private string _serialSummary = "";
     [ObservableProperty] private string _listenAddress = "";
     [ObservableProperty] private string _accessAddress = "";
@@ -59,6 +60,7 @@ public partial class MappingViewModel : ObservableObject
         var status = rt.GetStatus();
 
         Name = Config.Name;
+        PortName = Config.PortName;
         SerialSummary = Config.SerialSummary;
         ListenAddress = $"{Config.ListenIp}:{Config.ListenPort}";
         AccessAddress = rt.AccessAddress;
