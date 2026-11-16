@@ -163,18 +163,45 @@ public sealed class RemoteTcpDiscoveryTests
             await client.ConnectAsync();
             using var server = await listener.AcceptTcpClientAsync();
             // The peer does not read; large messages eventually stall the writer.
-            var chunk = new byte[1024 * 1024];
+            var chunk = new byte[8192];
             var accepted = 0;
-            for (var i = 0; i < 500; ++i)
+            for (var i = 0; i < 5000; ++i)
             {
                 if (!client.Send(chunk)) break;
                 accepted++;
             }
-            Assert.InRange(accepted, 1, 500);
+            Assert.InRange(accepted, 1, 5000);
             await client.DisconnectAsync();
             Assert.False(client.Send(new byte[] { 1 }));
         }
         finally { listener.Stop(); }
+    }
+
+    [Fact]
+    public async Task RemoteConnections_RemainPersistableAfterManagerShutdown()
+    {
+        var configPath = Path.Combine(Path.GetTempPath(), $"sb-remote-{Guid.NewGuid():N}.json");
+        try
+        {
+            await using var manager = new SerialBridge.Core.Management.RemoteConnectionManager();
+            manager.Add(new RemoteConnectionConfig
+            {
+                Name = "远程 COM3", Host = "192.168.1.100", Port = 9001,
+                AutoReconnect = true, AutoConnectOnStartup = true
+            });
+            await manager.DisposeAsync();
+            var store = new SerialBridge.Core.Config.ConfigStore(configPath);
+            store.Save(new AppSettings { RemoteConnections = manager.Sessions.Select(s => s.Config).ToList() });
+            var restored = store.Load();
+            var target = Assert.Single(restored.RemoteConnections);
+            Assert.Equal("远程 COM3", target.Name);
+            Assert.Equal("192.168.1.100", target.Host);
+            Assert.Equal(9001, target.Port);
+            Assert.True(target.AutoReconnect);
+            Assert.True(target.AutoConnectOnStartup);
+            Assert.False(restored.General.AllowLanDiscovery);
+        }
+        finally { File.Delete(configPath); }
     }
 
     [Fact]
