@@ -15,7 +15,14 @@ public static class LanDiscoveryProtocol
 }
 
 public sealed record DiscoveredMapping(Guid Id, string Name, string ComPort, int TcpPort,
-    string SerialParameters);
+    string SerialParameters, string ListenIp = "0.0.0.0")
+{
+    /// <summary>Use the actual TCP binding for a specific adapter, never
+    /// incorrectly substitute the UDP response's other adapter address.</summary>
+    public string ConnectAddress(string responseAddress) =>
+        string.IsNullOrWhiteSpace(ListenIp) || ListenIp == "0.0.0.0"
+            ? responseAddress : ListenIp;
+}
 public sealed record DiscoveredDevice(Guid DeviceId, string Name, string Address,
     IReadOnlyList<DiscoveredMapping> Mappings);
 
@@ -89,11 +96,13 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
                     query.Type != "discover" || !Guid.TryParse(query.RequestId, out _)) continue;
 
                 var mappings = _runningMappings()
-                    .Where(m => m.ListenIp != "127.0.0.1" && m.ListenIp != "::1")
+                    .Where(m => IPAddress.TryParse(m.ListenIp, out var ip) &&
+                        ip.AddressFamily == AddressFamily.InterNetwork &&
+                        !IPAddress.IsLoopback(ip))
                     .Take(LanDiscoveryProtocol.MaxMappings)
                     .Where(m => m.ListenPort is > 0 and <= 65535)
                     .Select(m => new DiscoveredMapping(m.Id, m.Name, m.PortName,
-                        m.ListenPort, m.SerialSummary)).ToList();
+                        m.ListenPort, m.SerialSummary, m.ListenIp)).ToList();
                 var response = new DiscoveryPacket
                 {
                     Magic = LanDiscoveryProtocol.Magic,
@@ -183,7 +192,10 @@ public static class LanDiscoveryScanner
                     p.Mappings is null || p.Mappings.Count > LanDiscoveryProtocol.MaxMappings) continue;
                 var mappings = p.Mappings.Where(m => m is not null &&
                     m.TcpPort is > 0 and <= 65535 &&
-                    !string.IsNullOrWhiteSpace(m.ComPort)).ToArray();
+                    !string.IsNullOrWhiteSpace(m.ComPort) &&
+                    IPAddress.TryParse(m.ConnectAddress(response.RemoteEndPoint.Address.ToString()), out var bindAddress) &&
+                    bindAddress.AddressFamily == AddressFamily.InterNetwork &&
+                    !IPAddress.IsLoopback(bindAddress)).ToArray();
                 var name = (p.Name ?? "").Trim();
                 if (string.IsNullOrWhiteSpace(name)) name = "未命名设备";
                 if (name.Length > 80) name = name[..80];
