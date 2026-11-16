@@ -149,6 +149,30 @@ public sealed class RemoteTcpDiscoveryTests
     }
 
     [Fact]
+    public async Task RemoteManager_AutoReconnectsAcrossSuccessivePeerDisconnects()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            await using var manager = new SerialBridge.Core.Management.RemoteConnectionManager();
+            var session = manager.Add(new RemoteConnectionConfig
+            { Host = "127.0.0.1", Port = port, AutoReconnect = true });
+            await manager.ConnectAsync(session);
+            using (var first = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(5)))
+                first.Client.Shutdown(SocketShutdown.Both);
+            using (var second = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(12)))
+                second.Client.Shutdown(SocketShutdown.Both);
+            using var third = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(12));
+            Assert.True(session.IsConnected);
+            await manager.DisconnectAsync(session);
+            Assert.False(session.IsConnected);
+        }
+        finally { listener.Stop(); }
+    }
+
+    [Fact]
     public async Task OutgoingQueue_NeverUsesSilentDropWriteMode()
     {
         // On a backpressured peer, Send() may return false. It must never
