@@ -150,6 +150,9 @@ public partial class MainWindow : FluentWindow
         UpdateTrayStatus();
     }
 
+    private void OnOpenRemoteConnections(object sender, RoutedEventArgs e)
+        => RemoteConnectionsWindow.OpenFor(this);
+
     private void OnOpenLinuxAccess(object sender, RoutedEventArgs e)
         => LinuxAccessWindow.Open(this);
 
