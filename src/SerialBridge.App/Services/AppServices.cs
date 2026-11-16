@@ -152,10 +152,12 @@ public static class AppServices
     {
         try
         {
+            // Persist user configuration before tearing down runtime sessions.
+            // Disconnection/disposal must never erase saved remote endpoints.
+            SaveSettings();
             if (Discovery is not null) await Discovery.DisposeAsync();
             await Remotes.DisposeAsync();
             await Manager.StopAllAsync();
-            SaveSettings();
         }
         catch (Exception ex)
         {
