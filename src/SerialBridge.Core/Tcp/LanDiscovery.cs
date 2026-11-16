@@ -181,15 +181,18 @@ public static class LanDiscoveryScanner
                 if (p?.Magic != LanDiscoveryProtocol.Magic || p.Type != "response" ||
                     p.RequestId != requestId || p.DeviceId == Guid.Empty ||
                     p.Mappings is null || p.Mappings.Count > LanDiscoveryProtocol.MaxMappings) continue;
-                var mappings = p.Mappings.Where(m => m.TcpPort is > 0 and <= 65535 &&
+                var mappings = p.Mappings.Where(m => m is not null &&
+                    m.TcpPort is > 0 and <= 65535 &&
                     !string.IsNullOrWhiteSpace(m.ComPort)).ToArray();
-                found[p.DeviceId] = new DiscoveredDevice(p.DeviceId,
-                    p.Name.Length > 80 ? p.Name[..80] : p.Name,
+                var name = (p.Name ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(name)) name = "未命名设备";
+                if (name.Length > 80) name = name[..80];
+                found[p.DeviceId] = new DiscoveredDevice(p.DeviceId, name,
                     response.RemoteEndPoint.Address.ToString(), mappings);
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested) { break; }
             catch (SocketException) { break; }
-            catch (JsonException) { }
+            catch (Exception ex) when (ex is JsonException or NullReferenceException or ArgumentException) { }
         }
         token.ThrowIfCancellationRequested();
         return found.Values.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToArray();
