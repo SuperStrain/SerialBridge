@@ -1,12 +1,13 @@
-using SerialBridge.Core.Models;
+using System.IO;
 using System.Net.Sockets;
 using System.Threading.Channels;
+using SerialBridge.Core.Models;
 
 namespace SerialBridge.Core.Tcp;
 
 /// <summary>
-/// Outgoing raw TCP session. Never buffers user commands across a disconnect.
-/// Closing a terminal view does not stop this session; caller owns its lifetime.
+/// One outgoing raw TCP stream. The caller owns the session; terminal windows
+/// only subscribe to its events. Bytes are NEVER replayed across reconnects.
 /// </summary>
 public sealed class RemoteTcpSession : IAsyncDisposable
 {
@@ -17,8 +18,8 @@ public sealed class RemoteTcpSession : IAsyncDisposable
     private Task? _worker;
     private volatile bool _connected;
     private long _sent, _received;
-    private int _generation;
     private bool _disposed;
+    private int _generation;
     private string _lastDisconnectReason = "未连接";
 
     public RemoteConnectionConfig Config { get; }
@@ -38,7 +39,12 @@ public sealed class RemoteTcpSession : IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_cancel is not null) return;
+            if (_connected) return;
+            // A previous read loop can be complete while its CTS/socket/queue
+            // still exist. Retire it BEFORE allowing a new connection.
+            await StopCoreAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
             var client = new TcpClient();
             try
             {
@@ -49,7 +55,10 @@ public sealed class RemoteTcpSession : IAsyncDisposable
                 var cancel = new CancellationTokenSource();
                 var output = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(256)
                 {
-                    SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false,
+                    // Never claim success for a dropped serial command.
+                    FullMode = BoundedChannelFullMode.Wait,
                 });
                 _client = client;
                 _cancel = cancel;
@@ -57,8 +66,8 @@ public sealed class RemoteTcpSession : IAsyncDisposable
                 _connected = true;
                 _lastDisconnectReason = "";
                 var generation = ++_generation;
-                _worker = RunAsync(client, output, cancel, generation);
-                StatusChanged?.Invoke();
+                _worker = RunAsync(client, output, cancel.Token, generation);
+                NotifyStatus();
             }
             catch
             {
@@ -69,17 +78,18 @@ public sealed class RemoteTcpSession : IAsyncDisposable
         finally { _lifecycle.Release(); }
     }
 
+    /// <summary>True means queued; false means disconnected or queue full.</summary>
     public bool Send(byte[] data)
     {
-        if (data.Length == 0) return IsConnected;
-        // Clone: caller may reuse its memory after the method returns.
-        return _connected && _output?.Writer.TryWrite(data.ToArray()) == true;
+        if (data is null) throw new ArgumentNullException(nameof(data));
+        if (data.Length == 0) return _connected;
+        var output = _output;
+        return _connected && output is not null && output.Writer.TryWrite(data.ToArray());
     }
 
     private async Task RunAsync(TcpClient client, Channel<byte[]> output,
-        CancellationTokenSource cancellation, int generation)
+        CancellationToken token, int generation)
     {
-        var token = cancellation.Token;
         var reason = "远程连接已断开";
         try
         {
@@ -93,31 +103,42 @@ public sealed class RemoteTcpSession : IAsyncDisposable
                     var n = await stream.ReadAsync(buffer, token).ConfigureAwait(false);
                     if (n == 0) break;
                     Interlocked.Add(ref _received, n);
-                    DataReceived?.Invoke(buffer.AsSpan(0, n).ToArray());
+                    // Subscribers are UI consumers and must not kill the TCP loop.
+                    try { DataReceived?.Invoke(buffer.AsSpan(0, n).ToArray()); }
+                    catch (Exception) { /* isolate terminal observers */ }
                 }
             }
-            catch (IOException ex) { reason = "远程连接异常：" + ex.Message; }
-            catch (SocketException ex) { reason = "网络错误：" + ex.SocketErrorCode; }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
+            {
+                reason = "远程连接异常：" + ex.Message;
+            }
             finally
             {
-                cancellation.Cancel();
                 output.Writer.TryComplete();
                 client.Dispose();
                 try { await writer.ConfigureAwait(false); }
                 catch (OperationCanceledException) { }
-                catch (IOException) { }
+                catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
+                {
+                    reason = "远程发送失败：" + ex.Message;
+                }
             }
         }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
+        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
+        {
+            reason = "远程连接异常：" + ex.Message;
+        }
         finally
         {
+            // Never clear a newer session or report a user-initiated disconnect as lost.
             if (generation == Volatile.Read(ref _generation))
             {
                 _connected = false;
                 _lastDisconnectReason = reason;
-                StatusChanged?.Invoke();
-                ConnectionLost?.Invoke(reason);
+                NotifyStatus();
+                try { ConnectionLost?.Invoke(reason); }
+                catch (Exception) { /* observer failures must not fault worker */ }
             }
         }
     }
@@ -132,38 +153,56 @@ public sealed class RemoteTcpSession : IAsyncDisposable
         }
     }
 
-    public async Task DisconnectAsync()
+    private void NotifyStatus()
     {
-        Task? worker;
-        CancellationTokenSource? cancellation;
-        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try { StatusChanged?.Invoke(); }
+        catch (Exception) { /* session must survive bad observers */ }
+    }
+
+    /// <summary>Must be called with _lifecycle held. Safe after natural EOF.</summary>
+    private async Task StopCoreAsync()
+    {
+        if (_client is null && _worker is null && _cancel is null) return;
+        _connected = false;
+        ++_generation;
+        var cancel = _cancel;
+        var client = _client;
+        var output = _output;
+        var worker = _worker;
+        _cancel = null;
+        _client = null;
+        _output = null;
+        _worker = null;
+        cancel?.Cancel();
+        output?.Writer.TryComplete();
+        client?.Dispose();
         try
         {
-            if (_cancel is null) return;
-            _connected = false;
-            ++_generation; // suppress late stale close notifications while deliberately stopping
-            cancellation = _cancel;
-            cancellation.Cancel();
-            _output?.Writer.TryComplete();
-            _client?.Dispose();
-            worker = _worker;
-            _worker = null;
-            _client = null;
-            _output = null;
-            _cancel = null;
-            StatusChanged?.Invoke();
+            if (worker is not null) await worker.ConfigureAwait(false);
         }
+        catch (OperationCanceledException) { }
+        finally { cancel?.Dispose(); }
+        NotifyStatus();
+    }
+
+    public async Task DisconnectAsync()
+    {
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try { await StopCoreAsync().ConfigureAwait(false); }
         finally { _lifecycle.Release(); }
-        if (worker is not null)
-            try { await worker.ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
-        cancellation?.Dispose();
     }
 
     public async ValueTask DisposeAsync()
     {
-        await DisconnectAsync().ConfigureAwait(false);
-        _disposed = true;
-        _lifecycle.Dispose();
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return;
+            _disposed = true;
+            await StopCoreAsync().ConfigureAwait(false);
+        }
+        finally { _lifecycle.Release(); }
+        // Keep semaphore allocated: late external callbacks must fail by the
+        // disposed flag, not by racing against SemaphoreSlim.Dispose().
     }
 }
