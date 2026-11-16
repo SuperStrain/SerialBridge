@@ -3,9 +3,9 @@
 
   # SerialBridge
 
-  **Give AI agents on your LAN direct access to real device serial ports.**
+  **Turn physical serial ports into network-accessible remote terminals.**
 
-  Expose physical serial ports on a Windows host as TCP endpoints so LAN-connected AI agents, developers, and automation scripts can interact with development boards and MCUs—accelerating debugging and validation.
+  Give serial consoles an SSH/Telnet-like remote-terminal experience without changing their protocol: share local COM ports over raw TCP, or discover and connect to remote SerialBridge instances from the same application.
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
@@ -21,6 +21,8 @@
 ---
 
 ## ✨ Why SerialBridge?
+
+**Access a serial console from another computer as easily as opening a remote terminal.** SerialBridge provides an experience reminiscent of SSH or Telnet, but **does not implement either protocol and does not provide SSH-style encryption or authentication**.
 
 **The primary goal is to connect AI agents to real hardware over serial.** Plug your USB-to-serial adapter into a Windows computer running SerialBridge. AI agents on the same LAN can then connect over TCP to read boot logs, send diagnostic commands, collect device responses, and use those responses to guide further investigation. This reduces manual copy-and-paste between an AI assistant and a serial terminal, speeding up embedded debugging and regression testing.
 
@@ -38,6 +40,8 @@ Regular TCP clients and human-operated terminals work too. **SerialBridge is a t
 | --- | --- |
 | 🤖 **AI agent access** | Agents on the same LAN can interact with device serial ports over TCP using the included Agent Skill or Python script |
 | 🔌 **Independent mappings** | Map each COM port to its own TCP listening endpoint; start and stop mappings individually |
+| 🌐 **Outgoing TCP client** | Connect to another SerialBridge serial-to-TCP endpoint and use the existing terminal and command macros |
+| 🔎 **LAN discovery** | Find opted-in SerialBridge hosts, their available COM mappings, IP addresses and TCP ports; discoverability is off by default |
 | 🔄 **Bidirectional raw transfer** | Forward arbitrary binary data with single- or multi-client modes and serialized serial writes |
 | 🛡️ **Connection recovery** | Configurable serial reconnection, occupied-port detection, slow-client protection, and bounded queues |
 | 💻 **Built-in terminal** | WebView2 + xterm.js with direct keystroke forwarding, search, scrollback, and font zoom |
@@ -47,6 +51,27 @@ Regular TCP clients and human-operated terminals work too. **SerialBridge is a t
 | 📦 **Installation & updates** | Windows installer or portable ZIP, GitHub Releases update checks, settings preserved on upgrade |
 
 > Macros send steps sequentially with **fixed delays**; they do **not** wait for a remote shell prompt or command completion. See [Quick commands & macros](docs/快捷命令与宏.md) (Chinese).
+
+## 🌐 Remote serial terminals between two SerialBridge computers
+
+**Computer B (server)** shares a physical `COM3` port via raw TCP port `9001`; **Computer A (client)** connects using SerialBridge's built-in terminal, without a USB-to-serial adapter attached locally.
+
+```text
+Computer A: SerialBridge remote TCP terminal ⇄ LAN / raw TCP ⇄ Computer B: 192.168.1.100:9001 → COM3 → device
+```
+
+**Discover and connect**
+
+1. On computer B, start the `COM3 → TCP 9001` mapping, bound to a LAN-accessible interface.
+2. On B, explicitly enable **Settings → LAN discovery → Allow other SerialBridge instances to discover this computer**. The setting is **off by default**.
+3. On A, open **Remote TCP → Scan LAN** to see the visible host, IP, mapping name, COM port, serial settings and TCP port.
+4. Choose a mapping and click **Save and Connect** to launch the shared terminal.
+
+**Connect manually**
+
+On A, open **Remote TCP → Saved connections**, enter B's IP/hostname and TCP port, save, and choose **Connect → Terminal**. Optional reconnect and connect-at-startup switches are **off by default**. Closing a terminal view keeps the TCP connection active; use **Disconnect** to close it.
+
+> Discovery uses **UDP port 39001** within the same IPv4 broadcast domain; host firewalls or network isolation may prevent scanning. Manual IP/port connections remain available even when discovery is disabled. **This is raw TCP serial transport, not an SSH/Telnet server.** The remote host controls COM parameters; commands are never replayed automatically after reconnect.
 
 ## 🤖 Debug real hardware with AI agents
 
@@ -193,11 +218,12 @@ See the [developer build & packaging guide](docs/编译与打包说明.md) (Chin
 | [Quick commands & macros](docs/快捷命令与宏.md) | Command bar, Text / HEX, delays, and safety boundaries (Chinese) |
 | [Developer build guide](docs/编译与打包说明.md) | Toolchain, builds, packaging and publishing (Chinese) |
 | [Tests & known limitations](docs/测试记录.md) | Test history and manual verification notes (Chinese) |
+| [Remote client and LAN discovery guide](docs/用户使用说明.md#35-远程-tcp-客户端与局域网发现) | Remote COM access, discovery, connection management, firewall troubleshooting (Chinese) |
 | [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) | Agent-oriented skill and scripts for using serial mappings over TCP (Chinese) |
 
 ## 🔐 Security
 
-**Raw TCP forwarding has no built-in encryption, authentication, or Telnet negotiation.** Use SerialBridge on trusted networks only, restrict the listening address and host firewall rules, and **do not expose the bridge directly to the public Internet**.
+**Raw TCP forwarding has no built-in encryption, authentication, or Telnet negotiation.** Discoverability is disabled by default; when enabled, hosts on the local network can obtain published COM mapping metadata. Discovery replies are unauthenticated. Use SerialBridge on trusted networks only, restrict the listening address and host firewall rules, and **do not expose the bridge directly to the public Internet**.
 
 In multi-client mode, serial data is broadcast to connected clients and inbound writes are serialized, but requests and responses from different clients are **not automatically correlated**. Passwords in quick-command presets are currently saved in local configuration; avoid storing sensitive real credentials.
 
