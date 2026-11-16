@@ -173,7 +173,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                 () => TerminalLoadingHost.Visibility = Visibility.Collapsed);
             Web.Focus();
             // 回放最近输出：从打开时刻起的数据会实时写入，无需回放
-            _viewModel.StateText = "终端就绪";
+            _viewModel.NoteReceived(0); // Refresh the real transport state, including remote disconnects.
         });
     }
 
@@ -422,7 +422,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                     if (text is null) return;
                     var bytes = Encoding.UTF8.GetBytes(text);
                     if (!_session.Send(bytes))
-                        _viewModel.StateText = "连接不可用，输入未发送";
+                        _viewModel.StateText = "连接已断开或发送队列已满，输入未发送";
                     else
                         _viewModel.NoteSent(bytes.Length);
                     break;
