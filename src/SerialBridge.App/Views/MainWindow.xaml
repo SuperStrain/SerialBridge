@@ -337,14 +337,15 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- 表头与行使用完全一致的列宽约束；需要时可水平滚动。 -->
+                <!-- 表头与数据行处于同一个滚动视口：出现纵向滚动条时统一缩窄内容，
+                     避免各自计算星号列宽造成错位。横向滚动仍可访问右侧操作。 -->
                 <Border Grid.Row="3" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                         BorderThickness="1" CornerRadius="9" Background="{DynamicResource ControlFillColorSecondaryBrush}">
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                         <Grid MinWidth="840">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Border Grid.Row="0" Background="{DynamicResource ControlFillColorDefaultBrush}" Padding="8,12"
                                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
@@ -368,8 +369,7 @@
                                     <TextBlock Grid.Column="7" Text="操作" FontWeight="SemiBold" />
                                 </Grid>
                             </Border>
-                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                                <StackPanel>
+                            <StackPanel Grid.Row="1">
                                     <ItemsControl ItemsSource="{Binding Mappings}" ItemTemplate="{StaticResource MappingCardTemplate}" />
                                     <StackPanel Margin="0,35" HorizontalAlignment="Center"
                                                 Visibility="{Binding HasMappings, Converter={StaticResource InverseBoolToVisibility}}">
@@ -378,8 +378,7 @@
                                         <TextBlock Text="点击上方“新增映射”开始配置" FontSize="12"
                                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
-                                </StackPanel>
-                            </ScrollViewer>
+                            </StackPanel>
                         </Grid>
                     </ScrollViewer>
                 </Border>
