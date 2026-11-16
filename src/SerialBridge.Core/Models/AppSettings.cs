@@ -22,6 +22,9 @@ public sealed class GeneralSettings
 
     /// <summary>串口终端底部快捷命令栏是否显示。</summary>
     public bool ShowCommandBar { get; set; } = true;
+
+    /// <summary>Explicit opt-in for LAN discovery responses; defaults to false.</summary>
+    public bool AllowLanDiscovery { get; set; }
 }
 
 /// <summary>整个应用的持久化根对象。</summary>
@@ -32,6 +35,10 @@ public sealed class AppSettings
     public int Version { get; set; } = CurrentVersion;
 
     public List<MappingConfig> Mappings { get; set; } = new();
+
+    public List<RemoteConnectionConfig> RemoteConnections { get; set; } = new();
+
+    public Guid DiscoveryDeviceId { get; set; } = Guid.NewGuid();
 
     public GeneralSettings General { get; set; } = new();
 

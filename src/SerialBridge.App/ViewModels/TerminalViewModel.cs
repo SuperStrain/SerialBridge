@@ -1,14 +1,14 @@
+using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using SerialBridge.Core.Bridge;
-using SerialBridge.Core.Models;
 
 namespace SerialBridge.App.ViewModels;
 
-/// <summary>串口终端 ViewModel：状态与统计（渲染与键盘在 WebView2/xterm.js 层）。</summary>
+/// <summary>Transport-neutral terminal status for local COM and remote TCP sessions.</summary>
 public partial class TerminalViewModel : ObservableObject
 {
-    private readonly MappingRuntime _runtime;
+    private readonly ITerminalSession _session;
+    private readonly SynchronizationContext? _ui = SynchronizationContext.Current;
 
     [ObservableProperty] private string _title = "串口终端";
     [ObservableProperty] private string _stateText = "";
@@ -17,46 +17,35 @@ public partial class TerminalViewModel : ObservableObject
     [ObservableProperty] private string _rxText = "0 B";
     [ObservableProperty] private string _txText = "0 B";
 
-    public TerminalViewModel(MappingRuntime runtime)
+    public TerminalViewModel(ITerminalSession session)
     {
-        _runtime = runtime;
-        Title = $"串口终端 — {runtime.Config.Name}";
-        runtime.StatusChanged += OnStatusChanged;
-        OnStatusChanged(null);
+        _session = session;
+        Title = session.Title + " · " + session.ConnectionDescription;
+        session.StateChanged += OnStatusChanged;
+        RefreshStatus();
     }
 
-    private void OnStatusChanged(object? _)
+    private void OnStatusChanged()
     {
-        var status = _runtime.GetStatus();
-        TxBytes = status.SerialTxBytes;
-        RxBytes = status.SerialRxBytes;
+        if (_ui is { } context && SynchronizationContext.Current != context)
+            context.Post(_ => RefreshStatus(), null);
+        else
+            RefreshStatus();
+    }
+
+    // Session configuration can change while its terminal window remains open.
+    // Refresh the identity together with connection state before more input is sent.
+    public void RefreshStatus()
+    {
+        Title = _session.Title + " · " + _session.ConnectionDescription;
+        TxBytes = _session.SentBytes;
+        RxBytes = _session.ReceivedBytes;
         TxText = MappingViewModel.FormatBytes(TxBytes);
         RxText = MappingViewModel.FormatBytes(RxBytes);
-        StateText = _runtime.IsRunning
-            ? status.SerialState switch
-            {
-                SerialState.Open => "设备已连接 — 逐键透传中",
-                SerialState.Faulted => "设备串口异常",
-                SerialState.ReconnectWaiting => "设备串口重连中，稍候恢复",
-                SerialState.Opening => "设备串口打开中…",
-                _ => "设备未连接",
-            }
-            : "映射未运行 — 请在主界面启动映射后使用终端";
+        StateText = _session.IsConnected ? "已连接 — 逐键透传中" : "连接已断开 — 请重新连接";
     }
 
-    /// <summary>按键透传流量（WebView2 层调用）。</summary>
-    public void NoteSent(int bytesCount)
-    {
-        // 统计已在 MappingRuntime.WriteLocal 计入 SerialTxBytes，此处刷新显示
-        var status = _runtime.GetStatus();
-        TxText = MappingViewModel.FormatBytes(status.SerialTxBytes);
-    }
-
-    public void NoteReceived(int bytesCount)
-    {
-        var status = _runtime.GetStatus();
-        RxText = MappingViewModel.FormatBytes(status.SerialRxBytes);
-    }
-
-    public void Detach() => _runtime.StatusChanged -= OnStatusChanged;
+    public void NoteSent(int bytesCount) => OnStatusChanged();
+    public void NoteReceived(int bytesCount) => OnStatusChanged();
+    public void Detach() => _session.StateChanged -= OnStatusChanged;
 }

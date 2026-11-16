@@ -122,7 +122,7 @@ public sealed class CommandPresetSenderTests
         var device = _factory.OpenedStreams.Single();
 
         var preset = Preset("中断宏",
-            new CommandStep { Format = "Text", Content = "one", Ending = "None", DelayMs = 5000 },
+            new CommandStep { Format = "Text", Content = "one", Ending = "None", DelayMs = 15000 },
             new CommandStep { Format = "Text", Content = "two", Ending = "None" });
 
         var run = CommandPresetSender.SendAsync(runtime, preset);
@@ -130,6 +130,10 @@ public sealed class CommandPresetSenderTests
         // 第一步写入串口后立即“拔出”设备，状态离开 Open 应触发永久中止
         await WaitUntil(() => device.DataWrittenByBridge.Count >= 1);
         device.Dispose();
+        // In busy CI workers the fake serial read loop may observe Dispose
+        // later than the 5s macro delay. Wait for the actual disconnect event
+        // rather than letting a timing race send step two first.
+        await WaitUntil(() => runtime.Serial.State != SerialState.Open, TimeSpan.FromSeconds(10));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
 

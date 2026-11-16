@@ -3,9 +3,9 @@
 
   # SerialBridge
 
-  **让局域网内的 AI Agent 直接访问设备串口。**
+  **让物理串口成为局域网里随时可访问的远程终端。**
 
-  将 Windows 上的物理串口转换为局域网内可访问的 TCP 端点，让 AI Agent、开发者和自动化脚本直接与开发板及 MCU 通信，加速设备调试与验证。
+  让串口拥有类似 SSH / Telnet 远程终端的跨电脑访问体验：将物理 COM 口共享为 TCP 服务，也能作为客户端自动发现并连接其他 SerialBridge。无需在电脑之间切换，就能调试开发板、MCU 和嵌入式 Linux 设备。
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
@@ -21,6 +21,8 @@
 ---
 
 ## ✨ 为什么选择 SerialBridge？
+
+**让串口不再局限于插着 USB 转串口线的那台电脑。** SerialBridge 将串口网络化，使远端的开发者和 AI Agent 也能像使用 SSH / Telnet 远程终端一样，打开设备控制台、输入命令并查看实时响应。**这里的“像”指使用体验，不表示采用 SSH、Telnet 或具有其认证、加密能力。**
 
 **项目的核心目标，是打通 AI Agent 与真实硬件之间的串口通道。** 将 USB 转串口设备连接到运行 SerialBridge 的 Windows 主机，同一局域网内的 AI Agent 即可通过 TCP 读取启动日志、发送调试命令、获取设备反馈，并根据结果继续分析或执行下一步操作。开发者不必在 AI 与串口终端之间反复复制粘贴，大幅减少设备调试、问题定位和回归验证的人工操作。
 
@@ -38,6 +40,8 @@ SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供
 | --- | --- |
 | 🤖 **AI Agent 访问设备** | 同一局域网内的 Agent 可通过 TCP 与设备串口交互；支持配套 Agent Skill / Python 脚本 |
 | 🔌 **多路串口映射** | 一条映射对应一个 COM 端口和 TCP 监听地址；独立启动、停止和配置 |
+| 🌐 **远程 TCP 客户端** | 作为客户端连接其他 SerialBridge 的 TCP 串口端口，直接复用内置终端与快捷命令 |
+| 🔎 **局域网设备发现** | 扫描主动允许被发现的 SerialBridge，查看开放的 COM、IP、TCP 端口；服务端发现开关默认关闭 |
 | 🔄 **双向透明传输** | 支持任意二进制字节、单/多客户端模式、串口写入顺序化 |
 | 🛡️ **断线恢复** | 串口拔插后可自动重连；端口占用检测、慢客户端保护、写入队列背压 |
 | 💻 **内置串口终端** | WebView2 + xterm.js，逐键透传、文本搜索、滚动历史、字体缩放 |
@@ -47,6 +51,28 @@ SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供
 | 📦 **安装与更新** | Windows 安装包 / 便携 ZIP、GitHub Releases 更新检查、升级保留配置 |
 
 > 宏是**固定延时的顺序发送**，不自动等待设备 Shell 提示符或命令执行完成。详见 [快捷命令与宏说明](docs/快捷命令与宏.md)。
+
+## 🌐 两台 SerialBridge 之间的远程串口操作
+
+**电脑 A 当客户端，电脑 B 当服务端。** 电脑 B 的开发板通过 USB 转串口接到 `COM3`，SerialBridge 将它共享到 `9001`；电脑 A 无需插串口线，就能使用自己的 SerialBridge 打开终端，读写远端设备。
+
+```text
+电脑 A（SerialBridge TCP 客户端）                 电脑 B（SerialBridge TCP 服务端）
+远程 TCP → 终端 / 快捷命令    ⇄   局域网 TCP   ⇄   192.168.1.100:9001 → COM3 → 开发板
+```
+
+**方式一：自动发现并连接（推荐）**
+
+1. 在电脑 B 新建并启动 `COM3 → TCP 9001` 映射，确保监听地址允许局域网访问。
+2. 电脑 B 打开 **设置 → 局域网发现**，主动开启 **允许被局域网内的 SerialBridge 发现**。此开关**默认关闭**，只有开启后才响应 UDP 扫描。
+3. 电脑 A 在主窗口点击 **远程 TCP** → **扫描局域网**，查看发现的电脑名称、IP、映射名称、COM、TCP 端口和串口参数。
+4. 选择目标 COM 映射，点击 **保存并连接**，软件建立原始 TCP 会话并打开终端。
+
+**方式二：手动连接**
+
+不想开放设备发现时，在电脑 A 的 **远程 TCP → 已保存连接** 输入连接名称、电脑 B 的 IP / 主机名和 TCP 端口，保存后点击 **连接 → 终端**。可按需打开自动重连与启动时连接；**默认均关闭**。关闭终端窗口不会断开 TCP，使用连接列表的 **断开** 才会结束会话。
+
+> **协议与网络边界：** 数据通道始终是**原始 TCP 字节透传**，不使用 SSH/Telnet 协议、虚拟 COM 驱动或远程控制 API。串口波特率等参数由电脑 B 设置。自动发现使用同一 IPv4 广播域中的 **UDP 39001**，可能受到 Windows 防火墙、网卡和 VLAN 的限制；扫描失败仍可手动连接。只列出远端正在监听、可供局域网访问的映射。网络中断后不会自动重发未完成的命令。
 
 ## 🤖 用 AI Agent 调试真实设备
 
@@ -193,11 +219,12 @@ dotnet publish src/SerialBridge.App -c Release -r win-x64 --self-contained true 
 | [快捷命令与宏](docs/快捷命令与宏.md) | 终端命令栏、Text / HEX、延时和安全边界 |
 | [开发者构建指南](docs/编译与打包说明.md) | 环境、编译、安装包与发布 |
 | [测试记录与已知限制](docs/测试记录.md) | 测试范围、问题及手工验证事项 |
+| [远程客户端与局域网发现指南](docs/用户使用说明.md#35-远程-tcp-客户端与局域网发现) | 发现远端 COM、手动连接、重连与防火墙排查 |
 | [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) | 供自动化代理通过 TCP 操作串口的技能与脚本 |
 
 ## 🔐 安全须知
 
-**原始 TCP 桥接默认没有加密、身份认证或 Telnet 协议处理。** 建议只在可信局域网中使用，配置合适的监听地址和 Windows 防火墙规则，**不要直接暴露到公网**。
+**原始 TCP 桥接默认没有加密、身份认证或 Telnet 协议处理，不能等同于 SSH 的安全性。** 局域网发现开关默认关闭；开启后同网段其他软件可能读取设备名和开放串口映射信息，发现结果并非经过身份认证。 建议只在可信局域网中使用，配置合适的监听地址和 Windows 防火墙规则，**不要直接暴露到公网**。
 
 多客户端模式下，串口数据会向多个客户端广播，写入按队列序列化，但不同客户端的请求与响应**不会自动配对**。快捷宏若含有密码，当前会写入本地配置文件，建议不要保存真实敏感凭据。
 

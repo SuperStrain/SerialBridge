@@ -208,6 +208,12 @@
                 </StackPanel>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <ui:Button ToolTip="连接其他 SerialBridge 的串口 TCP 服务" Click="OnOpenRemoteConnections" Appearance="Secondary">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Desktop24" />
+                        <TextBlock Text="远程 TCP" Margin="6,0,0,0" />
+                    </StackPanel>
+                </ui:Button>
                 <ui:Button ToolTip="Linux 主机访问指南（可复制命令）" Click="OnOpenLinuxAccess" Appearance="Secondary">
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="BookGlobe24" />

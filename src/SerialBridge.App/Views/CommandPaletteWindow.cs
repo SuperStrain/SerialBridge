@@ -33,9 +33,11 @@ public sealed class CommandPaletteWindow : Window
     private CommandStep? _editingFormatStep;
     private string? _editingOriginalFormat;
 
-    public CommandPaletteWindow(MappingRuntime runtime)
+    public CommandPaletteWindow(MappingRuntime runtime) : this($"{runtime.Config.Name} ({runtime.Config.PortName})") { }
+
+    public CommandPaletteWindow(string connectionLabel)
     {
-        Title = $"快捷命令与宏 — {runtime.Config.Name} ({runtime.Config.PortName})";
+        Title = $"快捷命令与宏 — {connectionLabel}";
         Width = 880;
         Height = 560;
         MinWidth = 760;
