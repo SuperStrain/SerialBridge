@@ -33,8 +33,11 @@ public partial class TerminalViewModel : ObservableObject
             RefreshStatus();
     }
 
-    private void RefreshStatus()
+    // Session configuration can change while its terminal window remains open.
+    // Refresh the identity together with connection state before more input is sent.
+    public void RefreshStatus()
     {
+        Title = _session.Title + " · " + _session.ConnectionDescription;
         TxBytes = _session.SentBytes;
         RxBytes = _session.ReceivedBytes;
         TxText = MappingViewModel.FormatBytes(TxBytes);
