@@ -1,3 +1,4 @@
+using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using SerialBridge.Core.Bridge;
 
@@ -7,6 +8,7 @@ namespace SerialBridge.App.ViewModels;
 public partial class TerminalViewModel : ObservableObject
 {
     private readonly ITerminalSession _session;
+    private readonly SynchronizationContext? _ui = SynchronizationContext.Current;
 
     [ObservableProperty] private string _title = "串口终端";
     [ObservableProperty] private string _stateText = "";
@@ -20,10 +22,18 @@ public partial class TerminalViewModel : ObservableObject
         _session = session;
         Title = session.Title + " · " + session.ConnectionDescription;
         session.StateChanged += OnStatusChanged;
-        OnStatusChanged();
+        RefreshStatus();
     }
 
     private void OnStatusChanged()
+    {
+        if (_ui is { } context && SynchronizationContext.Current != context)
+            context.Post(_ => RefreshStatus(), null);
+        else
+            RefreshStatus();
+    }
+
+    private void RefreshStatus()
     {
         TxBytes = _session.SentBytes;
         RxBytes = _session.ReceivedBytes;
