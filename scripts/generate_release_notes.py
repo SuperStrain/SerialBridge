@@ -136,7 +136,7 @@ def collect_changes(commits: list[tuple[str, str]], notes_dir: Path) -> list[dic
         description = note.get("说明") or (title if CHINESE.search(title) else GENERIC[category])
         # Non-user-facing maintenance commits are not release highlights unless
         # the maintainer explicitly supplied a Chinese note.
-        if category == "其他更新" and not note:
+        if category == "其他更新" and not note and not subject.startswith("Merge pull request #"):
             continue
         link = f"#{number}" if number else sha[:7]
         results.append({"category": category, "description": description,
