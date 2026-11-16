@@ -50,6 +50,14 @@ SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供
 
 ## 🤖 用 AI Agent 调试真实设备
 
+### 🎬 演示视频
+
+观看 AI Agent 如何在同一局域网内通过 SerialBridge 向设备串口发送命令，并读取串口返回的日志。
+
+https://github.com/user-attachments/assets/e6fa1c20-761f-4ae9-a3da-4ff2781e7a71
+
+### 连接示例
+
 例如，AI Agent 在 Linux 开发机上运行，而开发板的 USB 串口连接在另一台 Windows 电脑上：
 
 1. 在 Windows 上启动 SerialBridge，将开发板的 `COM3` 映射到 TCP 端口 `9001`。

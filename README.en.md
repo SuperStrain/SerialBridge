@@ -50,6 +50,14 @@ Regular TCP clients and human-operated terminals work too. **SerialBridge is a t
 
 ## 🤖 Debug real hardware with AI agents
 
+### 🎬 Video demo
+
+See how an AI agent on the same LAN uses SerialBridge to send commands to a device over serial and read the logs it returns.
+
+https://github.com/user-attachments/assets/e6fa1c20-761f-4ae9-a3da-4ff2781e7a71
+
+### Connection example
+
 For example, your AI agent runs on a Linux workstation while the development board's USB serial adapter is attached to a separate Windows PC:
 
 1. On Windows, configure SerialBridge to map the board's `COM3` to TCP port `9001`.
