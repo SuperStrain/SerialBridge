@@ -11,6 +11,7 @@ using SerialBridge.App.Services;
 using SerialBridge.App.ViewModels;
 using SerialBridge.Core.Bridge;
 using SerialBridge.Core.Models;
+using SerialBridge.Core.Tcp;
 
 namespace SerialBridge.App.Views;
 
@@ -28,7 +29,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     private const string EmptyCommandBarHint = "暂无快捷命令，点击「编辑」创建";
 
     private readonly TerminalViewModel _viewModel;
-    private readonly MappingRuntime _runtime;
+    private readonly ITerminalSession _session;
     private readonly TerminalWindowLifetime _lifetime = new();
     private CancellationTokenSource? _commandBarCancellation;
     private Task? _initializationTask;
@@ -41,24 +42,31 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         return brush;
     }
 
-    /// <summary>打开（或激活）指定映射的串口终端窗口。</summary>
-    public static void OpenFor(MappingRuntime runtime)
+    /// <summary>Direct local COM terminal (existing behavior).</summary>
+    public static void OpenFor(MappingRuntime runtime) =>
+        OpenForSession(runtime.Config.Id, () => new LocalTerminalSession(runtime));
+
+    /// <summary>Remote TCP terminal; closing the window leaves its connection running.</summary>
+    public static void OpenFor(RemoteTcpSession remote) =>
+        OpenForSession(remote.Config.Id, () => new RemoteTerminalSession(remote));
+
+    private static void OpenForSession(Guid id, Func<ITerminalSession> create)
     {
-        if (OpenWindows.TryGetValue(runtime.Config.Id, out var existing))
+        if (OpenWindows.TryGetValue(id, out var existing))
         {
             existing.Activate();
             return;
         }
-        var window = new TerminalWindow(runtime);
-        OpenWindows[runtime.Config.Id] = window;
+        var window = new TerminalWindow(create());
+        OpenWindows[id] = window;
         window.Show();
     }
 
-    public TerminalWindow(MappingRuntime runtime)
+    private TerminalWindow(ITerminalSession session)
     {
         InitializeComponent();
-        _runtime = runtime;
-        _viewModel = new TerminalViewModel(runtime);
+        _session = session;
+        _viewModel = new TerminalViewModel(session);
         DataContext = _viewModel;
 
         Loaded += (_, _) =>
@@ -66,17 +74,15 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
         Closed += (_, _) =>
         {
             _viewModel.Detach();
-            _runtime.DataTransferred -= OnDeviceData;
+            _session.Received -= OnDeviceData;
+            (_session as IDisposable)?.Dispose();
             CommandPaletteWindow.PresetsSaved -= OnPresetsSaved;
-            // 关闭终端即中止命令栏宏：窗口没了，后台不能再向设备继续发送剩余步骤。
             _commandBarCancellation?.Cancel();
-            OpenWindows.Remove(runtime.Config.Id);
+            OpenWindows.Remove(session.Id);
             _ = CleanupWebViewAsync();
         };
-        _runtime.DataTransferred += OnDeviceData;
+        _session.Received += OnDeviceData;
         CommandPaletteWindow.PresetsSaved += OnPresetsSaved;
-
-        // 命令栏显隐持久化（全局），打开时按上次状态恢复
         CommandBarHost.Visibility = AppServices.Settings.General.ShowCommandBar
             ? Visibility.Visible : Visibility.Collapsed;
         if (CommandBarHost.Visibility == Visibility.Visible) RebuildCommandBar();
@@ -208,7 +214,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     private void OnCommandBarEditClick(object sender, RoutedEventArgs e)
     {
         if (_lifetime.IsClosing) return;
-        var dialog = new CommandPaletteWindow(_runtime) { Owner = this };
+        var dialog = new CommandPaletteWindow(_session.Title) { Owner = this };
         dialog.ShowDialog();
         RefocusTerminal();
     }
@@ -274,7 +280,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
             }
             try
             {
-                CommandPresetSender.ThrowIfNotConnected(_runtime);
+                if (!_session.IsConnected) throw new IOException("连接已断开，已取消发送。");
             }
             catch (IOException ex)
             {
@@ -293,7 +299,23 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                 ? $"发送「{CommandPresetText.ButtonTitle(snapshot)}」…"
                 : $"执行宏「{CommandPresetText.ButtonTitle(snapshot)}」…");
             // 断开/停止映射后永久中止；单步命令瞬时入队，多步宏可用「停止」中断。
-            await CommandPresetSender.SendAsync(_runtime, snapshot, cancellation.Token);
+            void OnDisconnected()
+            {
+                if (!_session.IsConnected)
+                    try { cancellation.Cancel(); } catch (ObjectDisposedException) { }
+            }
+            _session.StateChanged += OnDisconnected;
+            try
+            {
+                OnDisconnected();
+                cancellation.Token.ThrowIfCancellationRequested();
+                await CommandMacroRunner.RunAsync(snapshot, bytes =>
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    return _session.IsConnected && _session.Send(bytes);
+                }, cancellation.Token);
+            }
+            finally { _session.StateChanged -= OnDisconnected; }
             SetCommandBarStatus($"已发送「{CommandPresetText.ButtonTitle(snapshot)}」");
         }
         catch (OperationCanceledException)
@@ -399,8 +421,10 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
                     var text = root.GetProperty("text").GetString();
                     if (text is null) return;
                     var bytes = Encoding.UTF8.GetBytes(text);
-                    _runtime.WriteLocal(bytes);
-                    _viewModel.NoteSent(bytes.Length);
+                    if (!_session.Send(bytes))
+                        _viewModel.StateText = "连接不可用，输入未发送";
+                    else
+                        _viewModel.NoteSent(bytes.Length);
                     break;
             }
         }
@@ -412,16 +436,15 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     // 设备输出 → xterm
-    private void OnDeviceData(SerialBridge.Core.Bridge.MonitorEntry entry)
+    private void OnDeviceData(byte[] bytes)
     {
-        if (entry.Direction != SerialBridge.Core.Models.DataDirection.SerialToNet) return;
         if (_lifetime.IsClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
-        var b64 = Convert.ToBase64String(entry.Data);
+        var b64 = Convert.ToBase64String(bytes);
         Dispatcher.BeginInvoke(() =>
         {
             if (!_ready || _lifetime.IsClosing) return;
             _ = Web.ExecuteScriptAsync($"window.writeB64('{b64}')");
-            _viewModel.NoteReceived(entry.Data.Length);
+            _viewModel.NoteReceived(bytes.Length);
         });
     }
 }
