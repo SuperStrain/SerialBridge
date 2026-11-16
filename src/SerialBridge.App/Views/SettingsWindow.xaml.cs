@@ -66,11 +66,27 @@ public partial class SettingsViewModel : ObservableObject
         _general = AppServices.Settings.General;
         _themeIndex = _general.Theme switch { "Dark" => 1, "Auto" => 2, _ => 0 };
         _restoreMappingsOnStartup = _general.RestoreMappingsOnStartup;
+        _allowLanDiscovery = _general.AllowLanDiscovery;
     }
 
     [ObservableProperty] private int _themeIndex;
     [ObservableProperty] private bool _launchOnStartup = StartupHelper.IsLaunchOnStartupEnabled();
     [ObservableProperty] private bool _restoreMappingsOnStartup;
+    [ObservableProperty] private bool _allowLanDiscovery;
+
+    partial void OnAllowLanDiscoveryChanged(bool value) => _ = ApplyDiscoveryAsync(value);
+
+    private async Task ApplyDiscoveryAsync(bool value)
+    {
+        try { await AppServices.SetLanDiscoveryEnabledAsync(value); }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show("局域网发现服务切换失败：" + ex.Message, "设置",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            _allowLanDiscovery = _general.AllowLanDiscovery;
+            OnPropertyChanged(nameof(AllowLanDiscovery));
+        }
+    }
     public string LogDirText => LogService.LogDir;
     public string AppVersion => AppServices.AppVersion;
 
