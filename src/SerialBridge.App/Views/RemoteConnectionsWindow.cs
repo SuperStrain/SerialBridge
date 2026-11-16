@@ -143,7 +143,7 @@ public sealed class RemoteConnectionsWindow : Window
         _autostart.IsChecked = false;
     }
 
-    private void SaveConnection()
+    private async void SaveConnection()
     {
         if (string.IsNullOrWhiteSpace(_name.Text) || string.IsNullOrWhiteSpace(_host.Text) ||
             !int.TryParse(_port.Text, out var port) || port is < 1 or > 65535)
@@ -152,22 +152,32 @@ public sealed class RemoteConnectionsWindow : Window
             return;
         }
         var existing = AppServices.Remotes.Sessions.FirstOrDefault(s => s.Config.Id == _editingId);
-        if (existing is not null && existing.IsConnected)
+        try
         {
-            _status.Text = "编辑连接地址前请先断开连接。";
-            return;
+            if (existing is not null)
+            {
+                // Cancel and await any pending connect/retry BEFORE changing host/port.
+                // This also disconnects an active connection; user reconnects after edit.
+                await AppServices.Remotes.UpdateConfigurationAsync(existing, _name.Text,
+                    _host.Text, port, _reconnect.IsChecked == true,
+                    _autostart.IsChecked == true);
+                _status.Text = "连接配置已更新，原连接已断开，请重新连接。";
+            }
+            else
+            {
+                AppServices.Remotes.Add(new RemoteConnectionConfig
+                {
+                    Name = _name.Text.Trim(), Host = _host.Text.Trim(), Port = port,
+                    AutoReconnect = _reconnect.IsChecked == true,
+                    AutoConnectOnStartup = _autostart.IsChecked == true
+                });
+                _status.Text = "远程连接已保存。";
+            }
+            AppServices.SaveSettingsSafe();
+            ClearForm();
+            RefreshSaved();
         }
-        var config = existing?.Config ?? new RemoteConnectionConfig();
-        config.Name = _name.Text.Trim();
-        config.Host = _host.Text.Trim();
-        config.Port = port;
-        config.AutoReconnect = _reconnect.IsChecked == true;
-        config.AutoConnectOnStartup = _autostart.IsChecked == true;
-        if (existing is null) AppServices.Remotes.Add(config);
-        AppServices.SaveSettingsSafe();
-        _status.Text = "远程连接已保存。";
-        ClearForm();
-        RefreshSaved();
+        catch (Exception ex) { _status.Text = "保存失败：" + ex.Message; }
     }
 
     private void RefreshSaved()
