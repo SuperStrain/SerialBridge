@@ -73,8 +73,12 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _launchOnStartup = StartupHelper.IsLaunchOnStartupEnabled();
     [ObservableProperty] private bool _restoreMappingsOnStartup;
     [ObservableProperty] private bool _allowLanDiscovery;
+    private bool _restoringDiscoverySetting;
 
-    partial void OnAllowLanDiscoveryChanged(bool value) => _ = ApplyDiscoveryAsync(value);
+    partial void OnAllowLanDiscoveryChanged(bool value)
+    {
+        if (!_restoringDiscoverySetting) _ = ApplyDiscoveryAsync(value);
+    }
 
     private async Task ApplyDiscoveryAsync(bool value)
     {
@@ -83,8 +87,9 @@ public partial class SettingsViewModel : ObservableObject
         {
             System.Windows.MessageBox.Show("局域网发现服务切换失败：" + ex.Message, "设置",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
-            _allowLanDiscovery = _general.AllowLanDiscovery;
-            OnPropertyChanged(nameof(AllowLanDiscovery));
+            _restoringDiscoverySetting = true;
+            try { AllowLanDiscovery = _general.AllowLanDiscovery; }
+            finally { _restoringDiscoverySetting = false; }
         }
     }
     public string LogDirText => LogService.LogDir;
