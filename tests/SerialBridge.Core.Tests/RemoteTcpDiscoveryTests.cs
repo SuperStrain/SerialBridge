@@ -165,7 +165,8 @@ public sealed class RemoteTcpDiscoveryTests
             using (var second = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(12)))
                 second.Client.Shutdown(SocketShutdown.Both);
             using var third = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(12));
-            Assert.True(session.IsConnected);
+            // Accept may finish before ConnectAsync updates the client state.
+            Assert.True(SpinWait.SpinUntil(() => session.IsConnected, TimeSpan.FromSeconds(3)));
             await manager.DisconnectAsync(session);
             Assert.False(session.IsConnected);
         }
