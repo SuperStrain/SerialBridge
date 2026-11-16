@@ -64,10 +64,14 @@ public partial class MappingEditWindow : FluentWindow
             _viewModel.FailExternal(error);
             return;
         }
+        // ReplaceMappingAsync updates the existing config object in place.
+        // Notify bindings immediately, including when the mapping stays stopped.
+        EditTarget.Update();
         AppServices.SaveSettingsSafe();
         if (wasRunning)
         {
             await AppServices.Manager.StartMappingAsync(rt);
+            EditTarget.Update();
             AppServices.SaveSettingsSafe();
         }
         _viewModel.MarkConfirmed();
