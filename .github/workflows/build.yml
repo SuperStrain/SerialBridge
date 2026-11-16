@@ -222,6 +222,8 @@ jobs:
       - name: Generate Chinese release notes
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only') || startsWith(github.ref, 'refs/tags/v') }}
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           python scripts/generate_release_notes.py --tag "v${{ steps.version.outputs.version }}" --output dist/release-notes.md
