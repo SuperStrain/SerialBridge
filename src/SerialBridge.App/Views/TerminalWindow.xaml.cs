@@ -54,6 +54,7 @@ public partial class TerminalWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (OpenWindows.TryGetValue(id, out var existing))
         {
+            existing._viewModel.RefreshStatus();
             existing.Activate();
             return;
         }
