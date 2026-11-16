@@ -5,8 +5,8 @@ SerialBridge 的定时发布、Actions 手动发布和手动 Tag 发布，均由
 
 ## 默认行为
 
-- 自动依据上一个正式语义化版本 Tag 和当前构建提交确定变更范围。
-- 按提交标题前缀 `feat/fix/perf/refactor/docs/ci/chore` 等分类。
+- 自动查询 GitHub 上最后一个**已成功发布且非草稿、非预发布**的正式 Release，使用其 Tag 与当前构建提交确定变更范围；即使存在发布失败的更高 Tag，也不会遗漏未发布的变更。
+- 仅遍历主线的 first-parent 提交：合并 PR 只形成一条变更，不重复列出其内部提交；直接推送到主分支的真实改动仍会保留。按提交标题前缀 `feat/fix/perf/refactor/docs/ci/chore` 等分类。
 - 版本概述、分类标题、下载说明、完整变更记录都使用中文。
 - 英文 PR 标题不会原样作为中文发布说明。未提供中文说明时使用保守的中文描述与 PR 链接，避免编造修复内容。
 - 版本没有可见变更时（例如人工重新发布），也能生成有效的中文维护说明。
@@ -42,11 +42,11 @@ SerialBridge 的定时发布、Actions 手动发布和手动 Tag 发布，均由
 ## 本地预览
 
 ```bash
-python scripts/generate_release_notes.py --tag v1.3.18 --output dist/release-notes.md
+python scripts/generate_release_notes.py --tag v1.3.18 --previous-tag v1.3.17 --output dist/release-notes.md
 python -m unittest discover -s tests -p test_release_notes.py -v
 ```
 
-该命令只创建本地 Markdown 文件，不创建 Tag、Release 或发布动作。
+本地预览可通过 `--previous-tag` 显式指定**真实已发布的正式版本**；CI 则通过 `GITHUB_TOKEN` 自动查询 GitHub Release 列表。命令只创建本地 Markdown 文件，不创建 Tag、Release 或发布动作。
 生成器只使用 Git 提交记录及仓库内的中文说明文件，不依赖付费 API 或 AI 服务。
 
 ## 不变的发布机制
