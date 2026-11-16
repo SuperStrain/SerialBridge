@@ -152,16 +152,14 @@ public static class AppServices
     {
         try
         {
-            // Persist user configuration before tearing down runtime sessions.
-            // Disconnection/disposal must never erase saved remote endpoints.
-            SaveSettings();
-            if (Discovery is not null) await Discovery.DisposeAsync();
-            await Remotes.DisposeAsync();
-            await Manager.StopAllAsync();
-        }
-        catch (Exception ex)
-        {
-            LogX.Error("退出清理异常：" + ex.Message, ex);
+            // Save before disposal to preserve remote configurations. A failed
+            // save (or stop) must not prevent the remaining cleanup stages.
+            await ShutdownCleanup.RunAsync(
+                SaveSettings,
+                async () => { if (Discovery is not null) await Discovery.DisposeAsync(); },
+                () => Remotes.DisposeAsync().AsTask(),
+                () => Manager.StopAllAsync(),
+                ex => LogX.Error("退出清理异常：" + ex.Message, ex));
         }
         finally
         {
