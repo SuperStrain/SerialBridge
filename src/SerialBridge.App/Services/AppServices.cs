@@ -7,6 +7,7 @@ using SerialBridge.Core.Logging;
 using SerialBridge.Core.History;
 using SerialBridge.Core.Management;
 using SerialBridge.Core.Models;
+using SerialBridge.Core.Tcp;
 
 namespace SerialBridge.App.Services;
 
@@ -29,6 +30,8 @@ public static class AppServices
     public static AppSettings Settings { get; private set; } = new();
     public static ConfigStore ConfigStore { get; private set; } = new();
     public static MappingManager Manager { get; private set; } = new();
+    public static RemoteConnectionManager Remotes { get; private set; } = new();
+    public static LanDiscoveryResponder? Discovery { get; private set; }
 
     private static bool _initialized;
 
@@ -48,6 +51,14 @@ public static class AppServices
         ConfigStore = new ConfigStore();
         Settings = ConfigStore.Load();
         Manager = new MappingManager();
+        Remotes = new RemoteConnectionManager();
+        Discovery = new LanDiscoveryResponder(() => Manager.Mappings
+            .Where(m => m.Tcp.IsListening).Select(m => m.Config).ToArray(), Settings.DiscoveryDeviceId);
+        if (Settings.General.AllowLanDiscovery)
+        {
+            try { Discovery.Start(); }
+            catch (Exception ex) { LogX.Error("局域网发现服务启动失败：" + ex.Message, ex); }
+        }
         _initialized = true;
 
         StartupHelper.SetLaunchOnStartup(Settings.General.LaunchOnStartup);
@@ -69,9 +80,34 @@ public static class AppServices
                     LogX.Warn($"映射「{cfg.Name}」自动启动失败：{error}");
             }
         }
+        foreach (var cfg in Settings.RemoteConnections)
+        {
+            try
+            {
+                var session = Remotes.Add(cfg);
+                if (cfg.AutoConnectOnStartup)
+                    _ = ConnectRemoteOnStartupAsync(session);
+            }
+            catch (Exception ex) { LogX.Warn("远程连接恢复失败：" + ex.Message); }
+        }
         var count = Settings.Mappings.Count;
         if (count > 0)
             LogX.Info($"已恢复 {count} 条映射配置。");
+    }
+
+    private static async Task ConnectRemoteOnStartupAsync(RemoteTcpSession session)
+    {
+        try { await Remotes.ConnectAsync(session); }
+        catch (Exception ex) { LogX.Warn("远程设备自动连接失败：" + ex.Message); }
+    }
+
+    public static async Task SetLanDiscoveryEnabledAsync(bool enabled)
+    {
+        if (Discovery is null) return;
+        if (enabled) Discovery.Start();
+        else await Discovery.StopAsync();
+        Settings.General.AllowLanDiscovery = enabled;
+        SaveSettingsSafe();
     }
 
     /// <summary>保存全部配置（映射列表 + 偏好）。</summary>
@@ -80,6 +116,7 @@ public static class AppServices
         lock (_saveGate)
         {
             Settings.Mappings = Manager.Mappings.Select(m => m.Config).ToList();
+            Settings.RemoteConnections = Remotes.Sessions.Select(s => s.Config).ToList();
             ConfigStore.Save(Settings);
         }
     }
@@ -115,6 +152,8 @@ public static class AppServices
     {
         try
         {
+            if (Discovery is not null) await Discovery.DisposeAsync();
+            await Remotes.DisposeAsync();
             await Manager.StopAllAsync();
             SaveSettings();
         }
