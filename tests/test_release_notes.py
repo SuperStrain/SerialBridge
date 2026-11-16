@@ -3,6 +3,9 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import io
+import json
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "generate_release_notes.py"
 spec = importlib.util.spec_from_file_location("generate_release_notes", SCRIPT)
@@ -60,6 +63,50 @@ class ChineseReleaseNotesTests(unittest.TestCase):
         body = notes.render("v1.3.18", "v1.3.17", [], {}, "SuperStrain/SerialBridge")
         self.assertIn("本版本为维护发布", body)
         self.assertIn("## 下载", body)
+
+    def test_first_parent_includes_one_merge_pr_not_internal_commits(self):
+        # A real merge has many internal commits, but only its single
+        # first-parent merge commit should be counted in the release notes.
+        calls = []
+        def fake_git(*args):
+            calls.append(args)
+            if args[0] == "log":
+                self.assertIn("--first-parent", args)
+                return "merge32\tMerge pull request #32 from feature/history\nmainfix\tfix: 修复安装失败"
+            if args[0] == "show":
+                return "Merge pull request #32 from feature/history\n\nfeat: persist history in SQLite"
+            raise AssertionError(args)
+
+        with patch.object(notes, "git", side_effect=fake_git):
+            entries = notes.first_parent_commits("v1.3.16")
+        self.assertEqual(2, len(entries))
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "32.md").write_text(
+                "分类：新增功能\n说明：新增 SQLite 客户端历史\n", encoding="utf-8")
+            changes = notes.collect_changes(entries, Path(tmp))
+        self.assertEqual(2, len(changes))
+        self.assertEqual("新增 SQLite 客户端历史", changes[0]["description"])
+        self.assertEqual("#32", changes[0]["link"])
+        self.assertEqual("修复安装失败", changes[1]["description"])
+
+    def test_failed_tag_is_not_used_as_previous_release(self):
+        # Unpublished v1.3.18 must never truncate a v1.3.19 changelog.
+        self.assertEqual("v1.3.17", notes.previous_tag(
+            "v1.3.19", ["v1.3.16", "v1.3.17"]))
+        with patch.object(notes.urllib.request, "urlopen") as mock_api:
+            mock_api.return_value.__enter__.return_value = io.BytesIO(
+                json.dumps([
+                    {"tag_name": "v1.3.17", "draft": False, "prerelease": False},
+                    {"tag_name": "v1.3.18", "draft": True, "prerelease": False},
+                    {"tag_name": "v1.3.16", "draft": False, "prerelease": False},
+                    {"tag_name": "v1.3.18-rc1", "draft": False, "prerelease": True},
+                ]).encode("utf-8"))
+            published = notes.published_release_tags("SuperStrain/SerialBridge", "test-token")
+        self.assertEqual("v1.3.17", notes.previous_tag("v1.3.19", published))
+
+    def test_missing_release_api_credentials_fails_closed(self):
+        with self.assertRaises(RuntimeError):
+            notes.published_release_tags("SuperStrain/SerialBridge", "")
 
     def test_invalid_curated_note_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
