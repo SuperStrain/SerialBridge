@@ -13,6 +13,7 @@ public sealed class RemoteConnectionManager : IAsyncDisposable
     {
         public CancellationTokenSource Cancellation { get; } = new();
         public Task? Task { get; set; }
+        public bool LostDuringRetry { get; set; }
     }
 
     private readonly List<RemoteTcpSession> _sessions = new();
@@ -56,8 +57,15 @@ public sealed class RemoteConnectionManager : IAsyncDisposable
         {
             if (_disposed || !session.Config.AutoReconnect ||
                 !_states.TryGetValue(session.Config.Id, out var state) ||
-                state.Cancellation.IsCancellationRequested ||
-                state.Task is { IsCompleted: false }) return;
+                state.Cancellation.IsCancellationRequested) return;
+            if (state.Task is { IsCompleted: false })
+            {
+                // If the just-reconnected peer disappears before this retry
+                // task returns, start another retry as the task completes.
+                state.LostDuringRetry = true;
+                return;
+            }
+            state.LostDuringRetry = false;
             state.Task = RetryLoopAsync(session, state);
         }
     }
@@ -66,28 +74,49 @@ public sealed class RemoteConnectionManager : IAsyncDisposable
     {
         var token = state.Cancellation.Token;
         var delay = 3000;
-        while (!token.IsCancellationRequested)
+        try
         {
-            try
+            while (!token.IsCancellationRequested)
             {
-                await Task.Delay(delay, token).ConfigureAwait(false);
-                await _gate.WaitAsync(token).ConfigureAwait(false);
                 try
                 {
-                    lock (_sync)
+                    await Task.Delay(delay, token).ConfigureAwait(false);
+                    await _gate.WaitAsync(token).ConfigureAwait(false);
+                    try
                     {
-                        if (_disposed || !_states.TryGetValue(session.Config.Id, out var current) ||
-                            !ReferenceEquals(current, state) || !_sessions.Contains(session))
-                            return;
+                        lock (_sync)
+                        {
+                            if (_disposed || !_states.TryGetValue(session.Config.Id, out var current) ||
+                                !ReferenceEquals(current, state) || !_sessions.Contains(session))
+                                return;
+                        }
+                        await session.ConnectAsync(token).ConfigureAwait(false);
+                        Changed?.Invoke();
+                        return;
                     }
-                    await session.ConnectAsync(token).ConfigureAwait(false);
-                    Changed?.Invoke();
-                    return;
+                    finally { _gate.Release(); }
                 }
-                finally { _gate.Release(); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+                catch (Exception) { delay = Math.Min(30000, delay * 2); }
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
-            catch (Exception) { delay = Math.Min(30000, delay * 2); }
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                if (!_disposed && !token.IsCancellationRequested &&
+                    _states.TryGetValue(session.Config.Id, out var current) &&
+                    ReferenceEquals(current, state) &&
+                    state.LostDuringRetry && !session.IsConnected)
+                {
+                    state.LostDuringRetry = false;
+                    state.Task = RetryLoopAsync(session, state);
+                }
+                else
+                {
+                    state.LostDuringRetry = false;
+                }
+            }
         }
     }
 
