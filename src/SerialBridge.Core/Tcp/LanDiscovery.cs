@@ -112,7 +112,14 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
                     Name = Environment.MachineName,
                     Mappings = mappings,
                 };
+                // Respect the on-wire byte limit, not only the number of mappings.
+                // A long mapping name must not make the entire device invisible.
                 var bytes = JsonSerializer.SerializeToUtf8Bytes(response);
+                while (bytes.Length > LanDiscoveryProtocol.MaxPacketBytes && response.Mappings.Count > 0)
+                {
+                    response.Mappings.RemoveAt(response.Mappings.Count - 1);
+                    bytes = JsonSerializer.SerializeToUtf8Bytes(response);
+                }
                 if (bytes.Length <= LanDiscoveryProtocol.MaxPacketBytes)
                     await udp.SendAsync(bytes, incoming.RemoteEndPoint, token).ConfigureAwait(false);
             }
