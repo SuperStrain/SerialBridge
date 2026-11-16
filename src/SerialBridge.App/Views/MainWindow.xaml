@@ -68,7 +68,7 @@
                                    ToolTip="打开串口日志目录" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <StackPanel Grid.Column="2" Margin="4,0" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Config.PortName}" FontWeight="Medium" FontSize="13" />
+                        <TextBlock Text="{Binding PortName, Mode=OneWay}" FontWeight="Medium" FontSize="13" />
                         <TextBlock Text="{Binding SerialSummary}" FontSize="11"
                                    TextTrimming="CharacterEllipsis"
                                    ToolTip="{Binding SerialSummary}"
