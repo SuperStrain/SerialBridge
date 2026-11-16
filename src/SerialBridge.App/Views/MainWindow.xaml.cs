@@ -157,17 +157,17 @@ public partial class MainWindow : FluentWindow
     // Keep it under Help so it cannot be mistaken for a live Linux session.
     private void OnOpenHelp(object sender, RoutedEventArgs e)
     {
-        var menu = new ContextMenu
+        var menu = new System.Windows.Controls.ContextMenu
         {
             PlacementTarget = sender as UIElement,
             Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
         };
-        var linux = new MenuItem { Header = "Linux 连接说明（文字教程）" };
+        var linux = new System.Windows.Controls.MenuItem { Header = "Linux 连接说明（文字教程）" };
         linux.Click += (_, _) => LinuxAccessWindow.Open(this);
-        var about = new MenuItem { Header = "关于 SerialBridge" };
+        var about = new System.Windows.Controls.MenuItem { Header = "关于 SerialBridge" };
         about.Click += OnOpenAbout;
         menu.Items.Add(linux);
-        menu.Items.Add(new Separator());
+        menu.Items.Add(new System.Windows.Controls.Separator());
         menu.Items.Add(about);
         menu.IsOpen = true;
     }
