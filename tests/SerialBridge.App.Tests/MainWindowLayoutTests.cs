@@ -72,6 +72,19 @@ public sealed class MainWindowLayoutTests
     }
 
     [Fact]
+    public void MappingPortName_BindsToNotifyingViewModelProperty()
+    {
+        var document = Markup();
+        var rowTemplate = document.Descendants().Single(e =>
+            e.Name.LocalName == "DataTemplate" &&
+            (string?)e.Attribute(Xaml + "Key") == "MappingCardTemplate");
+        Assert.Contains(rowTemplate.Descendants(), e =>
+            (string?)e.Attribute("Text") == "{Binding PortName, Mode=OneWay}");
+        Assert.DoesNotContain(rowTemplate.Descendants(), e =>
+            ((string?)e.Attribute("Text"))?.Contains("Config.PortName") == true);
+    }
+
+    [Fact]
     public void UpdateBadgeAndFirewallProtectionRemainAccessible()
     {
         var document = Markup();
