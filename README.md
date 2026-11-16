@@ -219,7 +219,7 @@ dotnet publish src/SerialBridge.App -c Release -r win-x64 --self-contained true 
 | [快捷命令与宏](docs/快捷命令与宏.md) | 终端命令栏、Text / HEX、延时和安全边界 |
 | [开发者构建指南](docs/编译与打包说明.md) | 环境、编译、安装包与发布 |
 | [测试记录与已知限制](docs/测试记录.md) | 测试范围、问题及手工验证事项 |
-| [远程客户端与局域网发现指南](docs/用户使用说明.md#4-远程-tcp-客户端与局域网发现) | 发现远端 COM、手动连接、重连与防火墙排查 |
+| [远程客户端与局域网发现指南](docs/用户使用说明.md#35-远程-tcp-客户端与局域网发现) | 发现远端 COM、手动连接、重连与防火墙排查 |
 | [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) | 供自动化代理通过 TCP 操作串口的技能与脚本 |
 
 ## 🔐 安全须知
