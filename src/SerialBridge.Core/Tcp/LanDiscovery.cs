@@ -34,15 +34,17 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
 {
     private readonly Func<IReadOnlyList<MappingConfig>> _runningMappings;
     private readonly Guid _deviceId;
+    private readonly int _port;
     private UdpClient? _socket;
     private CancellationTokenSource? _cancel;
     private Task? _loop;
 
     public LanDiscoveryResponder(Func<IReadOnlyList<MappingConfig>> runningMappings,
-        Guid deviceId)
+        Guid deviceId, int port = LanDiscoveryProtocol.Port)
     {
         _runningMappings = runningMappings;
         _deviceId = deviceId;
+        _port = port;
     }
 
     public bool IsRunning => _socket is not null;
@@ -54,7 +56,7 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
         try
         {
             udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            udp.Client.Bind(new IPEndPoint(IPAddress.Any, LanDiscoveryProtocol.Port));
+            udp.Client.Bind(new IPEndPoint(IPAddress.Any, _port));
             _cancel = new CancellationTokenSource();
             _socket = udp;
             _loop = ListenAsync(udp, _cancel.Token);
@@ -86,7 +88,9 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
                 if (query?.Magic != LanDiscoveryProtocol.Magic ||
                     query.Type != "discover" || !Guid.TryParse(query.RequestId, out _)) continue;
 
-                var mappings = _runningMappings().Take(LanDiscoveryProtocol.MaxMappings)
+                var mappings = _runningMappings()
+                    .Where(m => m.ListenIp != "127.0.0.1" && m.ListenIp != "::1")
+                    .Take(LanDiscoveryProtocol.MaxMappings)
                     .Where(m => m.ListenPort is > 0 and <= 65535)
                     .Select(m => new DiscoveredMapping(m.Id, m.Name, m.PortName,
                         m.ListenPort, m.SerialSummary)).ToList();
