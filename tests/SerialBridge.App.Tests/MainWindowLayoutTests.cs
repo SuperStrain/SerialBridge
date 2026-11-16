@@ -48,6 +48,30 @@ public sealed class MainWindowLayoutTests
     }
 
     [Fact]
+    public void MappingHeaderAndRows_ShareScrollViewport_WhenManyMappingsOverflow()
+    {
+        var document = Markup();
+        var mappingItems = document.Descendants().Single(e =>
+            e.Name.LocalName == "ItemsControl" &&
+            ((string?)e.Attribute("ItemsSource"))?.Contains("Mappings") == true);
+
+        var scrollViewers = mappingItems.Ancestors().Where(e =>
+            e.Name.LocalName == "ScrollViewer").ToArray();
+
+        // The header and rows must be in the SAME scrolling viewport so
+        // a vertical scrollbar cannot shrink only the mapping rows.
+        var tableScroll = Assert.Single(scrollViewers);
+        Assert.Equal("Auto", (string?)tableScroll.Attribute("VerticalScrollBarVisibility"));
+        Assert.Equal("Auto", (string?)tableScroll.Attribute("HorizontalScrollBarVisibility"));
+
+        var tableGrid = tableScroll.Elements().Single(e => e.Name.LocalName == "Grid");
+        var header = tableGrid.Elements().Single(e =>
+            e.Name.LocalName == "Border" && (string?)e.Attribute("Grid.Row") == "0");
+        Assert.Contains(header.Descendants(), e => (string?)e.Attribute("Text") == "映射名称");
+        Assert.Equal("1", (string?)mappingItems.Parent?.Attribute("Grid.Row"));
+    }
+
+    [Fact]
     public void UpdateBadgeAndFirewallProtectionRemainAccessible()
     {
         var document = Markup();
