@@ -81,6 +81,71 @@ public sealed class RemoteTcpDiscoveryTests
     }
 
     [Fact]
+    public async Task DiscoveryResponder_StopDuringReplyTraffic_AllowsRestartAndCleanStop()
+    {
+        using var probe = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var port = ((IPEndPoint)probe.Client.LocalEndPoint!).Port;
+        probe.Dispose();
+        var mappings = Enumerable.Range(0, LanDiscoveryProtocol.MaxMappings)
+            .Select(i => new MappingConfig
+            {
+                Name = "Long mapping " + new string('X', 120),
+                PortName = $"COM{i + 1}",
+                ListenIp = "0.0.0.0",
+                ListenPort = 9001 + i
+            }).ToArray();
+        await using var responder = new LanDiscoveryResponder(() => mappings, Guid.NewGuid(), port);
+        using var sender = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var request = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            Magic = LanDiscoveryProtocol.Magic,
+            Type = "discover",
+            RequestId = Guid.NewGuid().ToString("D")
+        });
+
+        // Keep requests arriving while the responder is canceled, including
+        // the window where it is serializing or sending a response.
+        for (var round = 0; round < 10; round++)
+        {
+            responder.Start();
+            Assert.True(responder.IsRunning);
+            using var trafficCancel = new CancellationTokenSource();
+            var traffic = Task.Run(async () =>
+            {
+                while (!trafficCancel.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await sender.SendAsync(request,
+                            new IPEndPoint(IPAddress.Loopback, port), trafficCancel.Token);
+                    }
+                    catch (OperationCanceledException) when (trafficCancel.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    await Task.Yield();
+                }
+            });
+            try
+            {
+                await Task.Delay(20);
+                await responder.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(responder.IsRunning);
+            }
+            finally
+            {
+                trafficCancel.Cancel();
+                await traffic.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        }
+
+        responder.Start();
+        Assert.True(responder.IsRunning);
+        await responder.StopAsync();
+        Assert.False(responder.IsRunning);
+    }
+
+    [Fact]
     public async Task DiscoveryResponder_TruncatesOversizedMappingListInsteadOfDroppingDevice()
     {
         using var probe = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
