@@ -123,6 +123,9 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
                 if (bytes.Length <= LanDiscoveryProtocol.MaxPacketBytes)
                     await udp.SendAsync(bytes, incoming.RemoteEndPoint, token).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
+            catch (ObjectDisposedException) when (token.IsCancellationRequested) { break; }
+            catch (SocketException) when (token.IsCancellationRequested) { break; }
             catch (Exception) when (!token.IsCancellationRequested)
             {
                 // Malformed/untrusted discovery packets must not stop service.
@@ -134,16 +137,28 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
     {
         var udp = _socket;
         if (udp is null) return;
-        _socket = null;
         var cancel = _cancel;
+        var loop = _loop;
+        _socket = null;
         _cancel = null;
-        cancel?.Cancel();
-        udp.Dispose();
-        if (_loop is { } task)
-            try { await task.ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
         _loop = null;
-        cancel?.Dispose();
+        try
+        {
+            cancel?.Cancel();
+            udp.Dispose();
+            if (loop is not null)
+            {
+                try { await loop.ConfigureAwait(false); }
+                catch (OperationCanceledException) when (cancel?.IsCancellationRequested == true) { }
+                catch (ObjectDisposedException) when (cancel?.IsCancellationRequested == true) { }
+                catch (SocketException) when (cancel?.IsCancellationRequested == true) { }
+            }
+        }
+        finally
+        {
+            udp.Dispose();
+            cancel?.Dispose();
+        }
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
