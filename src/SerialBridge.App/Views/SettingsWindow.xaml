@@ -81,6 +81,22 @@
                     </Grid>
                 </Border>
 
+                <TextBlock Text="局域网发现" FontSize="14" FontWeight="SemiBold" Margin="0,16,0,8"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Border Style="{StaticResource SettingsRowStyle}">
+                    <Grid>
+                        <StackPanel Margin="0,0,55,0">
+                            <TextBlock Text="允许被局域网内的 SerialBridge 发现" FontSize="13.5"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="默认关闭。开启后仅公开正在监听的串口映射名称、COM 口和 TCP 端口；不会开放远程管理权限。"
+                                       TextWrapping="Wrap" FontSize="11.5"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <CheckBox HorizontalAlignment="Right" VerticalAlignment="Center"
+                                  IsChecked="{Binding AllowLanDiscovery}" />
+                    </Grid>
+                </Border>
+
                 <TextBlock Text="日志" FontSize="14" FontWeight="SemiBold" Margin="0,16,0,8"
                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
                 <Border Style="{StaticResource SettingsRowStyle}">
