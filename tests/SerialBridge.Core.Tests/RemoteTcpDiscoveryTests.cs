@@ -81,6 +81,38 @@ public sealed class RemoteTcpDiscoveryTests
     }
 
     [Fact]
+    public async Task DiscoveryResponder_TruncatesOversizedMappingListInsteadOfDroppingDevice()
+    {
+        using var probe = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var port = ((IPEndPoint)probe.Client.LocalEndPoint!).Port;
+        probe.Dispose();
+        var mappings = Enumerable.Range(0, LanDiscoveryProtocol.MaxMappings)
+            .Select(i => new MappingConfig
+            {
+                Name = $"Mapping-{i}-" + new string('X', 200),
+                PortName = $"COM{i + 1}",
+                ListenIp = "0.0.0.0",
+                ListenPort = 10000 + i
+            }).ToArray();
+        await using var responder = new LanDiscoveryResponder(() => mappings, Guid.NewGuid(), port);
+        responder.Start();
+        using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var id = Guid.NewGuid().ToString("D");
+        var request = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            Magic = LanDiscoveryProtocol.Magic, Type = "discover", RequestId = id
+        });
+        await udp.SendAsync(request, new IPEndPoint(IPAddress.Loopback, port));
+        var response = await udp.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.InRange(response.Buffer.Length, 1, LanDiscoveryProtocol.MaxPacketBytes);
+        using var json = JsonDocument.Parse(response.Buffer);
+        Assert.Equal(id, json.RootElement.GetProperty("RequestId").GetString());
+        var returned = json.RootElement.GetProperty("Mappings");
+        Assert.InRange(returned.GetArrayLength(), 1, LanDiscoveryProtocol.MaxMappings - 1);
+        Assert.Equal("COM1", returned[0].GetProperty("ComPort").GetString());
+    }
+
+    [Fact]
     public async Task RemoteSession_FailedConnectionDoesNotBlockRetry()
     {
         var port = FreePort();
