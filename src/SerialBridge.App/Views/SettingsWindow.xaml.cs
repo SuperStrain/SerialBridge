@@ -74,17 +74,20 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _restoreMappingsOnStartup;
     [ObservableProperty] private bool _allowLanDiscovery;
     private bool _restoringDiscoverySetting;
+    private int _discoveryChangeVersion;
 
     partial void OnAllowLanDiscoveryChanged(bool value)
     {
-        if (!_restoringDiscoverySetting) _ = ApplyDiscoveryAsync(value);
+        if (!_restoringDiscoverySetting) _ = ApplyDiscoveryAsync(value, ++_discoveryChangeVersion);
     }
 
-    private async Task ApplyDiscoveryAsync(bool value)
+    private async Task ApplyDiscoveryAsync(bool value, int version)
     {
         try { await AppServices.SetLanDiscoveryEnabledAsync(value); }
         catch (Exception ex)
         {
+            // Ignore stale failures if a newer user choice is already queued.
+            if (version != _discoveryChangeVersion) return;
             System.Windows.MessageBox.Show("局域网发现服务切换失败：" + ex.Message, "设置",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             _restoringDiscoverySetting = true;
