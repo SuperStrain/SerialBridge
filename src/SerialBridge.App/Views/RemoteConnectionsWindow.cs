@@ -272,25 +272,26 @@ public sealed class RemoteConnectionsWindow : Window
                 });
                 foreach (var mapping in device.Mappings)
                 {
+                    var connectIp = mapping.ConnectAddress(device.Address);
                     var row = new StackPanel
                     {
                         Orientation = Orientation.Horizontal, Margin = new Thickness(12, 5, 0, 0)
                     };
                     row.Children.Add(new TextBlock
                     {
-                        Text = $"{mapping.Name} · {mapping.ComPort} · TCP {mapping.TcpPort} · {mapping.SerialParameters}",
+                        Text = $"{mapping.Name} · {mapping.ComPort} · {connectIp}:{mapping.TcpPort} · {mapping.SerialParameters}",
                         MinWidth = 450, VerticalAlignment = VerticalAlignment.Center
                     });
                     row.Children.Add(Action("保存并连接", async () =>
                     {
                         var existing = AppServices.Remotes.Sessions.FirstOrDefault(s =>
-                            s.Config.Host == device.Address && s.Config.Port == mapping.TcpPort);
+                            s.Config.Host == connectIp && s.Config.Port == mapping.TcpPort);
                         if (existing is null)
                         {
                             existing = AppServices.Remotes.Add(new RemoteConnectionConfig
                             {
                                 Name = $"{device.Name} - {mapping.ComPort}",
-                                Host = device.Address, Port = mapping.TcpPort,
+                                Host = connectIp, Port = mapping.TcpPort,
                             });
                             AppServices.SaveSettingsSafe();
                         }
