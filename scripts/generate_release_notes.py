@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import json
+import urllib.request
 
 CATEGORIES = ("新增功能", "问题修复", "功能优化", "其他更新")
 CATEGORY_BY_TYPE = {
@@ -42,6 +44,50 @@ def previous_tag(tag: str, tags: list[str]) -> str | None:
              for value in tags if (m := SEMVER.fullmatch(value))
              and tuple(map(int, m.groups())) < version]
     return max(older)[1] if older else None
+
+
+def published_release_tags(repo: str, token: str) -> list[str]:
+    """Query actual stable GitHub Releases, not local tags which may have failed publishing."""
+    if not token:
+        raise RuntimeError("缺少 GITHUB_TOKEN，无法确认上一正式发布版本")
+    results: list[str] = []
+    for page in range(1, 11):
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/releases?per_page=100&page={page}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "serialbridge-release-notes",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            batch = json.load(response)
+        results.extend(item["tag_name"] for item in batch
+                       if not item["draft"] and not item["prerelease"]
+                       and SEMVER.fullmatch(item["tag_name"]))
+        if len(batch) < 100:
+            return results
+    raise RuntimeError("Release 列表超出安全分页上限")
+
+
+def first_parent_commits(prior: str) -> list[tuple[str, str]]:
+    """Represent merged PRs as one mainline commit; retain direct main commits."""
+    subjects = git("log", "--first-parent", "--format=%H%x09%s", f"{prior}..HEAD")
+    result = []
+    for line in subjects.splitlines():
+        if "\t" not in line:
+            continue
+        sha, subject = line.split("\t", 1)
+        if re.match(r"^Merge pull request #\d+\b", subject, re.I):
+            body = git("show", "-s", "--format=%B", sha)
+            title = next((line.strip() for line in body.splitlines()[1:]
+                          if line.strip()), "")
+            if title and TYPE_PREFIX.match(title):
+                pr_number = PR_SUFFIX.search(subject).group(2)
+                subject = f"{title} (#{pr_number})"
+        result.append((sha, subject))
+    return result
 
 
 def parse_note(path: Path) -> dict[str, str]:
@@ -146,15 +192,22 @@ def main() -> None:
     parser.add_argument("--tag", required=True, help="例如 v1.3.18")
     parser.add_argument("--output", required=True)
     parser.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "SuperStrain/SerialBridge"))
+    parser.add_argument("--previous-tag", help="离线预览时指定上一已发布正式版")
     parser.add_argument("--notes-dir", default="release-notes/changes")
     parser.add_argument("--highlights-dir", default="release-notes/highlights")
     args = parser.parse_args()
 
-    prior = previous_tag(args.tag, git("tag", "--list").splitlines())
-    # HEAD is the exact build commit, including a generated version bump in
-    # scheduled/manual releases; release-version-only commits are excluded above.
-    subjects = git("log", "--format=%H%x09%s", f"{prior}..HEAD" if prior else "HEAD")
-    commits = [line.split("\t", 1) for line in subjects.splitlines() if "\t" in line]
+    if args.previous_tag:
+        prior = args.previous_tag
+        if not SEMVER.fullmatch(prior) or tuple(map(int, SEMVER.fullmatch(prior).groups())) >= tuple(map(int, SEMVER.fullmatch(args.tag).groups())):
+            raise ValueError("上一正式版必须是更早的有效语义化版本号")
+    else:
+        prior = previous_tag(args.tag, published_release_tags(
+            args.repo, os.getenv("GITHUB_TOKEN", "")))
+        if prior is None:
+            raise RuntimeError("未找到之前已发布的正式版本，请显式提供 --previous-tag")
+    # HEAD is the exact build commit. Only mainline commits are counted.
+    commits = first_parent_commits(prior)
     changes = collect_changes(commits, Path(args.notes_dir))
     highlights = parse_note(Path(args.highlights_dir) / f"{args.tag}.md")
     result = render(args.tag, prior, changes, highlights, args.repo)
