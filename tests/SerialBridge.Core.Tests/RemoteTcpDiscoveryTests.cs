@@ -230,6 +230,46 @@ public sealed class RemoteTcpDiscoveryTests
     }
 
     [Fact]
+    public void Discovery_UsesSpecificNicAddressInsteadOfUnrelatedUdpSource()
+    {
+        var boundToSecondAdapter = new DiscoveredMapping(
+            Guid.NewGuid(), "设备串口", "COM3", 9001, "115200 8N1", "10.10.0.5");
+        var boundToAllAdapters = new DiscoveredMapping(
+            Guid.NewGuid(), "设备串口", "COM4", 9002, "115200 8N1");
+        Assert.Equal("10.10.0.5", boundToSecondAdapter.ConnectAddress("192.168.1.100"));
+        Assert.Equal("192.168.1.100", boundToAllAdapters.ConnectAddress("192.168.1.100"));
+    }
+
+    [Fact]
+    public async Task RemoteManager_EditingConnectionDisconnectsOldHostBeforeChangingTarget()
+    {
+        var first = new TcpListener(IPAddress.Loopback, 0);
+        first.Start();
+        var second = new TcpListener(IPAddress.Loopback, 0);
+        second.Start();
+        try
+        {
+            var firstPort = ((IPEndPoint)first.LocalEndpoint).Port;
+            var secondPort = ((IPEndPoint)second.LocalEndpoint).Port;
+            await using var manager = new SerialBridge.Core.Management.RemoteConnectionManager();
+            var session = manager.Add(new RemoteConnectionConfig
+            { Name = "初始目标", Host = "127.0.0.1", Port = firstPort });
+            await manager.ConnectAsync(session);
+            using var firstConnection = await first.AcceptTcpClientAsync();
+            await manager.UpdateConfigurationAsync(session, "新目标", "127.0.0.1",
+                secondPort, autoReconnect: false, autoConnectOnStartup: false);
+            Assert.False(session.IsConnected);
+            Assert.Equal(secondPort, session.Config.Port);
+            Assert.Equal("新目标", session.Config.Name);
+            await manager.ConnectAsync(session);
+            using var secondConnection = await second.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(session.IsConnected);
+            await manager.DisconnectAsync(session);
+        }
+        finally { first.Stop(); second.Stop(); }
+    }
+
+    [Fact]
     public void OptInDiscoveryDefaultsOff()
     {
         var settings = new AppSettings();
