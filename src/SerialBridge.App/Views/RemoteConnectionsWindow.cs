@@ -23,6 +23,13 @@ public sealed class RemoteConnectionsWindow : Window
     private readonly System.Windows.Threading.DispatcherTimer _refresh;
     private Guid? _editingId;
 
+    // Reuse row controls across timer ticks so scrolling, keyboard focus and
+    // in-progress button interactions are never destroyed by a status refresh.
+    private readonly Dictionary<Guid, SavedConnectionRow> _savedRows = new();
+
+    private sealed record SavedConnectionRow(
+        Border Container, TextBlock Name, TextBlock Details, Button ConnectionButton);
+
     public static void OpenFor(Window owner)
     {
         if (_open is not null) { _open.Activate(); return; }
@@ -182,74 +189,105 @@ public sealed class RemoteConnectionsWindow : Window
 
     private void RefreshSaved()
     {
-        _savedList.Children.Clear();
         var sessions = AppServices.Remotes.Sessions;
-        if (sessions.Count == 0)
+        var ids = sessions.Select(s => s.Config.Id).ToHashSet();
+        // Only rebuild the list when its membership or order changes.
+        // The one-second timer otherwise updates the existing controls in place.
+        if (_savedRows.Count != sessions.Count ||
+            _savedRows.Keys.Any(id => !ids.Contains(id)) ||
+            !sessions.Select(s => s.Config.Id).SequenceEqual(
+                _savedList.Children.OfType<Border>()
+                    .Select(border => _savedRows.First(pair => pair.Value.Container == border).Key)))
         {
-            _savedList.Children.Add(new TextBlock { Text = "暂无连接。可手动添加或从局域网扫描结果中保存。" });
-            return;
+            _savedList.Children.Clear();
+            _savedRows.Clear();
+            if (sessions.Count == 0)
+            {
+                _savedList.Children.Add(new TextBlock
+                {
+                    Text = "暂无连接。可手动添加或从局域网扫描结果中保存。"
+                });
+            }
+            foreach (var session in sessions)
+            {
+                var row = CreateSavedRow(session);
+                _savedRows.Add(session.Config.Id, row);
+                _savedList.Children.Add(row.Container);
+            }
         }
+
         foreach (var session in sessions)
         {
-            var item = new Border
-            {
-                BorderThickness = new Thickness(1), BorderBrush = Brushes.LightGray,
-                CornerRadius = new CornerRadius(6), Margin = new Thickness(0, 0, 0, 9),
-                Padding = new Thickness(12)
-            };
-            var stack = new StackPanel();
-            stack.Children.Add(new TextBlock { Text = session.Config.Name, FontWeight = FontWeights.SemiBold, FontSize = 15 });
-            stack.Children.Add(new TextBlock
-            {
-                Text = $"{session.Config.Host}:{session.Config.Port} · {(session.IsConnected ? "已连接" : "未连接")} · " +
-                       $"发送 {session.SentBytes:N0} B / 接收 {session.ReceivedBytes:N0} B",
-                Foreground = Brushes.DimGray
-            });
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-            actions.Children.Add(Action(session.IsConnected ? "断开" : "连接", async () =>
-            {
-                try
-                {
-                    if (session.IsConnected) await AppServices.Remotes.DisconnectAsync(session);
-                    else await AppServices.Remotes.ConnectAsync(session);
-                    _status.Text = session.IsConnected ? "连接成功。" : "连接已断开。";
-                }
-                catch (Exception ex) { _status.Text = "连接失败：" + ex.Message; }
-                RefreshSaved();
-            }));
-            actions.Children.Add(Action("终端", () =>
-            {
-                if (!session.IsConnected)
-                {
-                    _status.Text = "请先连接远程设备。";
-                    return;
-                }
-                TerminalWindow.OpenFor(session);
-            }));
-            actions.Children.Add(Action("编辑", () =>
-            {
-                _editingId = session.Config.Id;
-                _name.Text = session.Config.Name;
-                _host.Text = session.Config.Host;
-                _port.Text = session.Config.Port.ToString();
-                _reconnect.IsChecked = session.Config.AutoReconnect;
-                _autostart.IsChecked = session.Config.AutoConnectOnStartup;
-            }));
-            actions.Children.Add(Action("删除", async () =>
-            {
-                try
-                {
-                    await AppServices.Remotes.RemoveAsync(session);
-                    AppServices.SaveSettingsSafe();
-                    _status.Text = "连接配置已删除。";
-                    RefreshSaved();
-                }
-                catch (Exception ex) { _status.Text = "删除失败：" + ex.Message; }
-            }));
-            stack.Children.Add(actions);
-            item.Child = stack;
-            _savedList.Children.Add(item);
+            var row = _savedRows[session.Config.Id];
+            row.Name.Text = session.Config.Name;
+            row.Details.Text = $"{session.Config.Host}:{session.Config.Port} · " +
+                $"{(session.IsConnected ? "已连接" : "未连接")} · " +
+                $"发送 {session.SentBytes:N0} B / 接收 {session.ReceivedBytes:N0} B";
+            row.ConnectionButton.Content = session.IsConnected ? "断开" : "连接";
         }
+    }
+
+    private SavedConnectionRow CreateSavedRow(SerialBridge.Core.Tcp.RemoteTcpSession session)
+    {
+        var item = new Border
+        {
+            BorderThickness = new Thickness(1), BorderBrush = Brushes.LightGray,
+            CornerRadius = new CornerRadius(6), Margin = new Thickness(0, 0, 0, 9),
+            Padding = new Thickness(12)
+        };
+        var stack = new StackPanel();
+        var name = new TextBlock { FontWeight = FontWeights.SemiBold, FontSize = 15 };
+        var details = new TextBlock { Foreground = Brushes.DimGray };
+        stack.Children.Add(name);
+        stack.Children.Add(details);
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0)
+        };
+        var connectionButton = Action("连接", async () =>
+        {
+            try
+            {
+                if (session.IsConnected) await AppServices.Remotes.DisconnectAsync(session);
+                else await AppServices.Remotes.ConnectAsync(session);
+                _status.Text = session.IsConnected ? "连接成功。" : "连接已断开。";
+            }
+            catch (Exception ex) { _status.Text = "连接失败：" + ex.Message; }
+            RefreshSaved();
+        });
+        actions.Children.Add(connectionButton);
+        actions.Children.Add(Action("终端", () =>
+        {
+            if (!session.IsConnected)
+            {
+                _status.Text = "请先连接远程设备。";
+                return;
+            }
+            TerminalWindow.OpenFor(session);
+        }));
+        actions.Children.Add(Action("编辑", () =>
+        {
+            _editingId = session.Config.Id;
+            _name.Text = session.Config.Name;
+            _host.Text = session.Config.Host;
+            _port.Text = session.Config.Port.ToString();
+            _reconnect.IsChecked = session.Config.AutoReconnect;
+            _autostart.IsChecked = session.Config.AutoConnectOnStartup;
+        }));
+        actions.Children.Add(Action("删除", async () =>
+        {
+            try
+            {
+                await AppServices.Remotes.RemoveAsync(session);
+                AppServices.SaveSettingsSafe();
+                _status.Text = "连接配置已删除。";
+                RefreshSaved();
+            }
+            catch (Exception ex) { _status.Text = "删除失败：" + ex.Message; }
+        }));
+        stack.Children.Add(actions);
+        item.Child = stack;
+        return new SavedConnectionRow(item, name, details, connectionButton);
     }
 
     private async Task ScanAsync()
