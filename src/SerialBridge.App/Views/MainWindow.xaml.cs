@@ -153,8 +153,52 @@ public partial class MainWindow : FluentWindow
     private void OnOpenRemoteConnections(object sender, RoutedEventArgs e)
         => RemoteConnectionsWindow.OpenFor(this);
 
-    private void OnOpenLinuxAccess(object sender, RoutedEventArgs e)
-        => LinuxAccessWindow.Open(this);
+    // Linux access remains a usage guide, not a connection workflow.
+    // Keep it under Help so it cannot be mistaken for a live Linux session.
+    private void OnOpenHelp(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu
+        {
+            PlacementTarget = sender as UIElement,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+        };
+        var linux = new MenuItem { Header = "Linux 连接说明（文字教程）" };
+        linux.Click += (_, _) => LinuxAccessWindow.Open(this);
+        var about = new MenuItem { Header = "关于 SerialBridge" };
+        about.Click += OnOpenAbout;
+        menu.Items.Add(linux);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(about);
+        menu.IsOpen = true;
+    }
+
+    private void OnOpenAbout(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show(
+            $"SerialBridge v{AppServices.AppVersion}\n\n" +
+            "串口网络桥接工具：将本机 COM 串口双向透明映射到 TCP，" +
+            "支持远程 TCP 终端和局域网发现。\n\n" +
+            "原始 TCP 通信不提供内置认证或加密，仅限可信网络。",
+            "关于 SerialBridge", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void OnShowLocalIps(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show(
+            "可用本机 IPv4 地址：\n\n" + _viewModel.LocalIpSummary +
+            "\n\n客户端连接时，请使用可到达的本机 IP 和映射监听的 TCP 端口。" +
+            "\n0.0.0.0 只表示监听所有网卡，并非客户端目标地址。",
+            "本机网络地址", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void OnMappingMoreClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.ContextMenu is not { } menu) return;
+        menu.DataContext = element.DataContext;
+        menu.PlacementTarget = element;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
 
     private void OnCaptureBadgeClick(object sender, MouseButtonEventArgs e)
     {
