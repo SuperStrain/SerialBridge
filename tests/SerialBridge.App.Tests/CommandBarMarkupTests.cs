@@ -54,13 +54,12 @@ public sealed class CommandBarMarkupTests
     }
 
     [Fact]
-    public void FooterHint_StaysOnLastRow()
+    public void FooterHint_IsRemoved()
     {
         var document = LoadTerminalWindowMarkup();
-        Assert.Equal(5, document.Descendants(Presentation + "RowDefinition").Count());
-
-        // 提示条（逐键透传说明）必须是最后一个 Border 且位于最后一行
-        var footer = document.Descendants(Presentation + "Border").Last();
-        Assert.Equal("4", (string?)footer.Attribute("Grid.Row"));
+        // 底部快捷键帮助小字已按需求整体移除：只剩 4 行（标题栏/工具条/终端/命令栏）
+        Assert.Equal(4, document.Descendants(Presentation + "RowDefinition").Count());
+        Assert.DoesNotContain(document.Descendants(), element =>
+            ((string?)element.Attribute("Text"))?.Contains("逐键透传模式") == true);
     }
 }

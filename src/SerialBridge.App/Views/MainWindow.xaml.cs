@@ -20,6 +20,19 @@ public partial class MainWindow : FluentWindow
     private bool _exitFromTray;
     private static bool _trayHintShown;
 
+    /// <summary>
+    /// 行操作显现等级 0-5：0 只显示"···"菜单，5 显示全部五个快捷图标且隐藏"···"。
+    /// 由映射表格宽度驱动（窄窗口收纳进菜单，拉宽后渐进显现），供行模板绑定。
+    /// </summary>
+    public static readonly DependencyProperty RowActionsLevelProperty = DependencyProperty.Register(
+        nameof(RowActionsLevel), typeof(int), typeof(MainWindow), new PropertyMetadata(0));
+
+    public int RowActionsLevel
+    {
+        get => (int)GetValue(RowActionsLevelProperty);
+        private set => SetValue(RowActionsLevelProperty, value);
+    }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -28,6 +41,23 @@ public partial class MainWindow : FluentWindow
         Loaded += (_, _) => InitializeTray();
         Closing += OnWindowClosing;
         StateChanged += OnStateChanged;
+    }
+
+    /// <summary>
+    /// 行操作显现等级 0-4：0 只显示"···"菜单，4 显示全部快捷图标且隐藏"···"。
+    /// （客户端计数已并入常驻操作组；渐进项为 监控/日志/编辑/删除 四个图标。）
+    /// 以"窗口宽度"为唯一输入，阈值保证各档位内容最小宽 ≤ 当前窗口宽。
+    /// </summary>
+    private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        RowActionsLevel = e.NewSize.Width switch
+        {
+            >= 1220 => 4,
+            >= 1170 => 3,
+            >= 1120 => 2,
+            >= 1090 => 1,
+            _ => 0,
+        };
     }
 
     // ---------- 系统托盘 ----------
@@ -92,6 +122,7 @@ public partial class MainWindow : FluentWindow
 
     protected override void OnClosed(EventArgs e)
     {
+        PageRemote.StopRefresh();
         _viewModel.Shutdown();
         _trayIcon?.Dispose();
         base.OnClosed(e);
@@ -134,6 +165,14 @@ public partial class MainWindow : FluentWindow
         var next = current == "Dark" ? "Light" : "Dark";
         AppServices.Settings.General.Theme = next;
         App.ApplyTheme(next);
+        // ApplicationThemeManager 在切换时会为窗口写入本地 Background 值，
+        // 覆盖掉 XAML 的 DynamicResource；切回浅色后旧深色值会残留（标题栏发黑）。
+        // 这里在其处理完成后重新挂回资源引用，让背景继续跟随主题。
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        {
+            ClearValue(BackgroundProperty);
+            SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
+        }));
         var icon = FindName("ThemeIcon") as Wpf.Ui.Controls.SymbolIcon;
         if (icon is not null)
             icon.Symbol = next == "Dark"
@@ -142,19 +181,80 @@ public partial class MainWindow : FluentWindow
         AppServices.SaveSettingsSafe();
     }
 
+    // ---------- 页面导航 ----------
+
+    // 远程连接与设置不再弹窗，统一在主界面右侧工作台内切换页面。
+    private void ShowPage(string title, string subtitle, UIElement page, Wpf.Ui.Controls.Button activeNav)
+    {
+        PageTitle.Text = title;
+        PageSubtitle.Text = subtitle;
+
+        PageDashboard.Visibility = page == PageDashboard ? Visibility.Visible : Visibility.Collapsed;
+        PageRemote.Visibility = page == PageRemote ? Visibility.Visible : Visibility.Collapsed;
+        PageSettings.Visibility = page == PageSettings ? Visibility.Visible : Visibility.Collapsed;
+
+        NavMappings.Appearance = activeNav == NavMappings
+            ? Wpf.Ui.Controls.ControlAppearance.Primary : Wpf.Ui.Controls.ControlAppearance.Transparent;
+        NavRemote.Appearance = activeNav == NavRemote
+            ? Wpf.Ui.Controls.ControlAppearance.Primary : Wpf.Ui.Controls.ControlAppearance.Transparent;
+        NavSettings.Appearance = activeNav == NavSettings
+            ? Wpf.Ui.Controls.ControlAppearance.Primary : Wpf.Ui.Controls.ControlAppearance.Transparent;
+    }
+
+    private void OnNavDashboard(object sender, RoutedEventArgs e)
+        => ShowPage("串口映射", "将本地串口转换为 TCP 服务，支持局域网远程访问与 AI Agent 调试",
+            PageDashboard, NavMappings);
+
     private void OnOpenSettings(object sender, RoutedEventArgs e)
     {
-        var settings = new SettingsWindow(this) { Owner = this };
-        settings.ShowDialog();
-        // 设置可能改变了关闭行为，刷新托盘
+        ShowPage("设置", "主题、启动、局域网发现与更新等偏好设置", PageSettings, NavSettings);
+        // 设置可能改变托盘相关行为，顺手保持托盘状态最新
         UpdateTrayStatus();
     }
 
     private void OnOpenRemoteConnections(object sender, RoutedEventArgs e)
-        => RemoteConnectionsWindow.OpenFor(this);
+        => ShowPage("远程 TCP 连接", "连接同一局域网内的 SerialBridge 或其他原始 TCP 串口服务；终端关闭后连接仍会保持。",
+            PageRemote, NavRemote);
 
-    private void OnOpenLinuxAccess(object sender, RoutedEventArgs e)
-        => LinuxAccessWindow.Open(this);
+    // Linux access remains a usage guide, not a connection workflow.
+    // Keep it under Help so it cannot be mistaken for a live Linux session.
+    private void OnOpenHelp(object sender, RoutedEventArgs e)
+    {
+        var menu = new System.Windows.Controls.ContextMenu
+        {
+            PlacementTarget = sender as UIElement,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+        };
+        var linux = new System.Windows.Controls.MenuItem { Header = "Linux 连接说明（文字教程）" };
+        linux.Click += (_, _) => LinuxAccessWindow.Open(this);
+        // “关于”统一由设置页承载，帮助菜单只保留使用类入口。
+        menu.Items.Add(linux);
+        menu.IsOpen = true;
+    }
+
+    private void OnShowLocalIps(object sender, RoutedEventArgs e)
+    {
+        if (LocalIpPopup is { } popup) popup.IsOpen = !popup.IsOpen;
+    }
+
+    private void OnMappingMoreClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.ContextMenu is not { } menu) return;
+        menu.DataContext = element.DataContext;
+        menu.PlacementTarget = element;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        // 菜单只列出尚未在行内显现为图标的操作：等级 N 时前 N 项隐藏
+        var index = 0;
+        foreach (var item in menu.Items)
+        {
+            if (item is System.Windows.Controls.MenuItem menuItem)
+                menuItem.Visibility = index < RowActionsLevel
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+            index++;
+        }
+        menu.IsOpen = true;
+    }
 
     private void OnCaptureBadgeClick(object sender, MouseButtonEventArgs e)
     {

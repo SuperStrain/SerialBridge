@@ -32,8 +32,12 @@ public partial class MappingViewModel : ObservableObject
     // ---------- 可绑定状态 ----------
 
     [ObservableProperty] private string _name = "";
+    [ObservableProperty] private string _portName = "";
     [ObservableProperty] private string _serialSummary = "";
+    [ObservableProperty] private string _serialParams = "";
     [ObservableProperty] private string _listenAddress = "";
+    [ObservableProperty] private string _listenScopeText = "";
+    [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private string _accessAddress = "";
     [ObservableProperty] private string _localAddress = "";
     [ObservableProperty] private string _captureStatusText = "";
@@ -59,8 +63,13 @@ public partial class MappingViewModel : ObservableObject
         var status = rt.GetStatus();
 
         Name = Config.Name;
+        PortName = Config.PortName;
         SerialSummary = Config.SerialSummary;
+        // SerialSummary 形如 "COM8 @ 115200 8N1"，表格里把端口名与串口参数分行展示
+        var splitAt = SerialSummary.IndexOf(" @ ", StringComparison.Ordinal);
+        SerialParams = splitAt >= 0 ? SerialSummary[(splitAt + 3)..] : "";
         ListenAddress = $"{Config.ListenIp}:{Config.ListenPort}";
+        ListenScopeText = Config.ListenIp == "0.0.0.0" ? "监听所有网卡" : $"监听 {Config.ListenIp}";
         AccessAddress = rt.AccessAddress;
         LocalAddress = $"127.0.0.1:{Config.ListenPort}";
         UpdateCaptureStatus();

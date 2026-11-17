@@ -4,15 +4,17 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:vm="clr-namespace:SerialBridge.App.ViewModels"
+    xmlns:views="clr-namespace:SerialBridge.App.Views"
     xmlns:conv="clr-namespace:SerialBridge.App.Converters"
     xmlns:tb="clr-namespace:H.NotifyIcon;assembly=H.NotifyIcon.Wpf"
     Title="SerialBridge — 串口网络桥接工具"
     Width="1180" Height="820"
-    MinWidth="960" MinHeight="640"
+    MinWidth="1080" MinHeight="640"
     WindowStartupLocation="CenterScreen"
     Icon="pack://application:,,,/Assets/app.ico"
     ExtendsContentIntoTitleBar="True"
-    WindowBackdropType="Mica"
+    SizeChanged="OnWindowSizeChanged"
+    WindowBackdropType="None"
     Background="{DynamicResource ApplicationBackgroundBrush}">
 
     <ui:FluentWindow.Resources>
@@ -39,127 +41,142 @@
         <conv:BoolToRunTextConverter x:Key="BoolToRunText" />
         <conv:StringToBrushConverter x:Key="StringToBrush" />
 
-        <!-- 单条映射卡片模板 -->
+        <!-- 紧凑映射表格行，功能命令继续使用原 MappingViewModel。 -->
         <DataTemplate x:Key="MappingCardTemplate" DataType="{x:Type vm:MappingViewModel}">
-            <Border
-                Background="{DynamicResource ControlFillColorDefaultBrush}"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1" CornerRadius="8" Padding="20,16" Margin="0,0,0,12">
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,0,1" Padding="8,12">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="36" />
+                        <ColumnDefinition Width="4*" MinWidth="96" />
+                        <ColumnDefinition Width="1.55*" MinWidth="88" />
+                        <ColumnDefinition Width="1.8*" MinWidth="112" />
+                        <ColumnDefinition Width="1.4*" MinWidth="88" />
+                        <ColumnDefinition Width="1.0*" MinWidth="84" />
+                        <ColumnDefinition Width="{Binding RowActionsLevel, RelativeSource={RelativeSource AncestorType=ui:FluentWindow}, Converter={StaticResource RowActionsLevelToWidth}}" />
                     </Grid.ColumnDefinitions>
-
-                    <!-- 状态色条 -->
-                    <Border Grid.Column="0" Width="4" Margin="0,4,16,4"
-                            CornerRadius="2"
-                            Background="{Binding StateBrush, Converter={StaticResource StringToBrush}}" />
-
-                    <!-- 信息区 -->
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold"
+                    <CheckBox Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                              MinWidth="0" MinHeight="0" Padding="0"
+                              IsChecked="{Binding IsSelected}" ToolTip="勾选后可批量启动/停止" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="14,0,8,0" VerticalAlignment="Center">
+                        <Border Width="40" Height="40" CornerRadius="10" Background="#2E16A34A" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="SerialPort24" FontSize="20" Foreground="#16A34A" />
+                        </Border>
+                        <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14"
+                                       TextTrimming="CharacterEllipsis"
                                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                            <Border Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                                    CornerRadius="4" Padding="6,2" Margin="10,2,0,0"
-                                    VerticalAlignment="Center">
-                                <TextBlock Text="{Binding ModeText}" FontSize="11"
-                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                            </Border>
-                            <Border CornerRadius="4" Padding="6,2" Margin="6,2,0,0" VerticalAlignment="Center"
-                                    Background="#1A16A34A">
-                                <TextBlock FontSize="11" Foreground="#16A34A">
-                                    <Run Text="● " /><Run Text="{Binding StateText, Mode=OneWay}" />
-                                </TextBlock>
-                            </Border>
-                            <TextBlock Margin="8,2,0,0" VerticalAlignment="Center" FontSize="11"
-                                       Foreground="#0891B2" Cursor="Hand"
-                                       MouseLeftButtonDown="OnCaptureBadgeClick"
-                                       ToolTip="点击打开串口日志目录"
-                                       Text="{Binding CaptureStatusText, Mode=OneWay}" />
+                            <TextBlock Text="串口转 TCP 服务" FontSize="11" Margin="0,3,0,0"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <TextBlock Text="{Binding CaptureStatusText}" FontSize="11" Foreground="#0891B2"
+                                       Cursor="Hand" MouseLeftButtonDown="OnCaptureBadgeClick"
+                                       ToolTip="打开串口日志目录" TextTrimming="CharacterEllipsis"
+                                       Visibility="{Binding HasCaptureStatus, Converter={StaticResource BoolToVisibility}}" />
                         </StackPanel>
-
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <ui:SymbolIcon Symbol="SerialPort24" FontSize="15"
-                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                            <TextBlock Text="{Binding SerialSummary}" Margin="6,0,18,0" FontSize="13"
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="4,0" VerticalAlignment="Center">
+                        <ui:SymbolIcon Symbol="SerialPort24" FontSize="15" VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                            <ui:SymbolIcon Symbol="Earth24" FontSize="15"
-                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                            <TextBlock Margin="6,0,0,0" FontSize="13"
-                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}">
-                                <Run Text="监听 " /><Run Text="{Binding ListenAddress, Mode=OneWay}" />
-                            </TextBlock>
+                        <StackPanel Margin="7,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding PortName, Mode=OneWay}" FontWeight="Medium" FontSize="13" />
+                            <TextBlock Text="{Binding SerialParams, Mode=OneWay}" FontSize="11"
+                                       TextTrimming="CharacterEllipsis"
+                                       ToolTip="{Binding SerialSummary}"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
-
-                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                            <ui:SymbolIcon Symbol="LinkMultiple24" FontSize="15"
-                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                            <TextBlock Margin="6,0,0,0" FontSize="12.5"
-                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                       ToolTip="局域网内设备使用该地址连接">
-                                <Run Text="客户端连接地址：" />
-                                <Run Text="{Binding AccessAddress, Mode=OneWay}" FontWeight="Medium" />
-                            </TextBlock>
-                            <TextBlock Margin="16,0,0,0" FontSize="12.5"
-                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                       Text="{Binding SerialStateText}" />
-                            <TextBlock Margin="16,0,0,0" FontSize="12.5"
-                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                       ToolTip="本机软件（PuTTY Raw/Xshell Telnet/内置串口终端）可使用的连接地址">
-                                <Run Text="本机连接: " />
-                                <Run Text="{Binding LocalAddress, Mode=OneWay}" FontWeight="Medium" />
-                            </TextBlock>
+                    </StackPanel>
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="4,0" VerticalAlignment="Center">
+                        <ui:SymbolIcon Symbol="Wifi124" FontSize="15" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <StackPanel Margin="7,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding ListenAddress}" FontSize="12.5" FontWeight="Medium"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding ListenAddress}" />
+                            <TextBlock Text="{Binding ListenScopeText, Mode=OneWay}" FontSize="10.5"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding AccessAddress}"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                         </StackPanel>
-
-                        <!-- 错误/提示 -->
-                        <TextBlock Margin="0,8,0,0" FontSize="12.5" TextWrapping="Wrap"
-                                   Foreground="#DC2626"
-                                   Visibility="{Binding HasFault, Converter={StaticResource BoolToVisibility}}">
-                            <Run Text="⚠ " /><Run Text="{Binding FaultMessage, Mode=OneWay}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="4,0">
+                        <TextBlock Foreground="#16A34A" FontSize="12">
+                            <Run Text="↓ " /><Run Text="{Binding RxBytes, Converter={StaticResource BytesToText}}" />
+                        </TextBlock>
+                        <TextBlock Foreground="#EA580C" FontSize="12" Margin="0,3,0,0">
+                            <Run Text="↑ " /><Run Text="{Binding TxBytes, Converter={StaticResource BytesToText}}" />
                         </TextBlock>
                     </StackPanel>
-
-                    <!-- 统计区 -->
-                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,20,0">
-                        <ui:Button HorizontalAlignment="Right"
-                                   AutomationProperties.AutomationId="OpenClientsButton"
-                                   Appearance="Transparent"
-                                   ToolTip="查看客户端详情"
-                                   Content="{Binding ClientsButtonText, Mode=OneWay}"
-                                   Command="{Binding OpenClientsCommand}"
-                                   Padding="8,4" />
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0" HorizontalAlignment="Right">
-                            <TextBlock FontSize="12.5" Foreground="#0E7490">
-                                <Run Text="↓ " /><Run Text="{Binding RxBytes, Mode=OneWay, Converter={StaticResource BytesToText}}" />
+                    <StackPanel Grid.Column="5" Margin="4,0" VerticalAlignment="Center">
+                        <!-- 胶囊底色与文字同源：跟随运行状态变绿/灰/红，停止态不再是绿色。 -->
+                        <Grid HorizontalAlignment="Left">
+                            <Border CornerRadius="12" Opacity="0.13"
+                                    Background="{Binding StateBrush, Converter={StaticResource StringToBrush}}" />
+                            <TextBlock FontSize="11.5" Margin="8,3"
+                                       Foreground="{Binding StateBrush, Converter={StaticResource StringToBrush}}">
+                                <Run Text="● " /><Run Text="{Binding StateText, Mode=OneWay}" />
                             </TextBlock>
-                            <TextBlock FontSize="12.5" Margin="14,0,0,0" Foreground="#B45309">
-                                <Run Text="↑ " /><Run Text="{Binding TxBytes, Mode=OneWay, Converter={StaticResource BytesToText}}" />
-                            </TextBlock>
-                        </StackPanel>
+                        </Grid>
+                        <TextBlock Text="{Binding FaultMessage}" FontSize="10.5" Foreground="#DC2626"
+                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding FaultMessage}"
+                                   Visibility="{Binding HasFault, Converter={StaticResource BoolToVisibility}}" />
                     </StackPanel>
-
-                    <!-- 操作区 -->
-                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                        <ui:Button Command="{Binding ToggleRunCommand}"
-                                   Appearance="{Binding IsRunning, Converter={StaticResource RunToAppearance}}"
-                                   Content="{Binding IsRunning, Converter={StaticResource BoolToRunText}}"
-                                   MinWidth="76" />
-                        <ui:Button ToolTip="串口终端：在软件内直接与设备交互" Margin="8,0,0,0"
-                                   Command="{Binding OpenTerminalCommand}">
-                            <ui:SymbolIcon Symbol="ChatMultiple24" />
+                    <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,0,0">
+                        <ui:Button Command="{Binding OpenTerminalCommand}" Padding="9,6"
+                                   ToolTip="打开本机串口终端">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="ChatMultiple24" FontSize="15" />
+                                <TextBlock Text="终端" Margin="4,0,0,0" />
+                            </StackPanel>
                         </ui:Button>
-                        <ui:Button ToolTip="数据监控" Margin="8,0,0,0" Command="{Binding OpenMonitorCommand}">
-                            <ui:SymbolIcon Symbol="ArrowSwap24" />
+                        <ui:Button Command="{Binding ToggleRunCommand}" Margin="5,0,0,0" Padding="9,6"
+                                   ToolTip="启动或停止当前映射">
+                            <Grid>
+                                <ui:SymbolIcon Symbol="PlayCircle24" FontSize="16"
+                                               Visibility="{Binding IsRunning, Converter={StaticResource InverseBoolToVisibility}}" />
+                                <ui:SymbolIcon Symbol="RecordStop24" FontSize="16"
+                                               Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
+                            </Grid>
                         </ui:Button>
-                        <ui:Button ToolTip="编辑" Margin="8,0,0,0" Command="{Binding EditCommand}">
-                            <ui:SymbolIcon Symbol="EditSettings24" />
+                        <!-- 随窗口加宽逐个显现的快捷操作；窄窗口时收纳进右侧"···"菜单。 -->
+                        <ui:Button Padding="9,6" ToolTip="查看已连接的客户端"
+                                   AutomationProperties.AutomationId="OpenClientsButton"
+                                   Command="{Binding OpenClientsCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="PeopleTeam24" FontSize="15" />
+                                <TextBlock Text="{Binding ClientCount}" Margin="5,0,0,0" />
+                            </StackPanel>
                         </ui:Button>
-                        <ui:Button ToolTip="删除" Margin="8,0,0,0" Command="{Binding DeleteCommand}">
-                            <ui:SymbolIcon Symbol="DeleteDismiss24" />
+                        <ui:Button Margin="5,0,0,0" Padding="9,6" ToolTip="数据监控"
+                                   Command="{Binding OpenMonitorCommand}"
+                                   Visibility="{Binding RowActionsLevel, RelativeSource={RelativeSource AncestorType=ui:FluentWindow}, Converter={StaticResource IntAtLeastToVisibility}, ConverterParameter=1}">
+                            <ui:SymbolIcon Symbol="ArrowSwap24" FontSize="16" />
+                        </ui:Button>
+                        <ui:Button Margin="5,0,0,0" Padding="9,6" ToolTip="打开日志目录"
+                                   Command="{Binding OpenCaptureFolderCommand}"
+                                   Visibility="{Binding RowActionsLevel, RelativeSource={RelativeSource AncestorType=ui:FluentWindow}, Converter={StaticResource IntAtLeastToVisibility}, ConverterParameter=2}">
+                            <ui:SymbolIcon Symbol="Folder24" FontSize="16" />
+                        </ui:Button>
+                        <ui:Button Margin="5,0,0,0" Padding="9,6" ToolTip="编辑映射"
+                                   Command="{Binding EditCommand}"
+                                   Visibility="{Binding RowActionsLevel, RelativeSource={RelativeSource AncestorType=ui:FluentWindow}, Converter={StaticResource IntAtLeastToVisibility}, ConverterParameter=3}">
+                            <ui:SymbolIcon Symbol="EditSettings24" FontSize="16" />
+                        </ui:Button>
+                        <ui:Button Margin="5,0,0,0" Padding="9,6" ToolTip="删除映射"
+                                   Command="{Binding DeleteCommand}"
+                                   Visibility="{Binding RowActionsLevel, RelativeSource={RelativeSource AncestorType=ui:FluentWindow}, Converter={StaticResource IntAtLeastToVisibility}, ConverterParameter=4}">
+                            <ui:SymbolIcon Symbol="DeleteDismiss24" FontSize="16" />
+                        </ui:Button>
+                        <ui:Button Margin="5,0,0,0" Padding="9,6" ToolTip="更多映射操作" Click="OnMappingMoreClick"
+                                   Visibility="{Binding RowActionsLevel, RelativeSource={RelativeSource AncestorType=ui:FluentWindow}, Converter={StaticResource IntBelowToVisibility}, ConverterParameter=4}">
+                            <ui:SymbolIcon Symbol="MoreHorizontal24" FontSize="16" />
+                            <ui:Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="数据监控" Command="{Binding OpenMonitorCommand}" />
+                                    <MenuItem Header="打开日志目录" Command="{Binding OpenCaptureFolderCommand}" />
+                                    <Separator />
+                                    <MenuItem Header="编辑映射" Command="{Binding EditCommand}" />
+                                    <MenuItem Header="删除映射" Command="{Binding DeleteCommand}" />
+                                </ContextMenu>
+                            </ui:Button.ContextMenu>
                         </ui:Button>
                     </StackPanel>
                 </Grid>
@@ -167,212 +184,334 @@
         </DataTemplate>
     </ui:FluentWindow.Resources>
 
+    <!-- 主区域：左侧真实功能导航 + 右侧映射工作台。 -->
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+        <Grid Grid.Row="0">
+            <ui:TitleBar Title="" Padding="8,0" />
+            <!-- 升级入口移到窗口左上角：有新版本时显示，点击打开升级弹窗。 -->
+            <Border x:Name="UpdateBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
+                    Margin="12,0,0,0" Background="#1A16A34A" CornerRadius="4" Padding="7,2"
+                    Cursor="Hand" MouseLeftButtonDown="OnUpdateBadgeClick"
+                    ToolTip="{Binding UpdateBadgeVersion}"
+                    Visibility="{Binding UpdateBadgeVisible, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="NEW" FontSize="11" FontWeight="Bold" Foreground="#16A34A" />
+            </Border>
+        </Grid>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="205" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-        <!-- 标题栏 -->
-        <ui:TitleBar Grid.Row="0" Title="SerialBridge 串口网络桥接" Padding="8,0" />
-
-        <!-- 页头 -->
-        <Grid Grid.Row="1" Margin="32,16,32,8">
-            <StackPanel Orientation="Horizontal">
-                <Image Width="42" Height="42"
-                       Source="pack://application:,,,/Assets/app-logo.png"
-                       Stretch="Uniform"
-                       RenderOptions.BitmapScalingMode="HighQuality"
-                       UseLayoutRounding="True"
-                       ToolTip="SerialBridge" />
-                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="SerialBridge" FontSize="22" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                        <!-- 新版本可用时的常驻 NEW 徽章（点击打开更新弹窗） -->
-                        <Border x:Name="UpdateBadge" Margin="10,0,0,0" VerticalAlignment="Center"
-                                Background="#1A16A34A" CornerRadius="4" Padding="7,2"
-                                Cursor="Hand" MouseLeftButtonDown="OnUpdateBadgeClick"
-                                ToolTip="{Binding UpdateBadgeVersion}"
-                                Visibility="{Binding UpdateBadgeVisible, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="NEW" FontSize="11" FontWeight="Bold" Foreground="#16A34A" />
+            <!-- 左侧导航：不重复放置远程连接、设置入口。 -->
+            <Border Grid.Column="0" Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
+                <DockPanel Margin="15,20,15,14" LastChildFill="False">
+                    <StackPanel DockPanel.Dock="Top">
+                        <StackPanel Orientation="Horizontal" Margin="3,2,0,25">
+                            <Image Width="44" Height="44" Source="pack://application:,,,/Assets/app-logo.png"
+                                   Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                            <StackPanel VerticalAlignment="Center" Margin="9,0,0,0">
+                                <TextBlock Text="SerialBridge" FontSize="17" FontWeight="Bold" />
+                                <TextBlock Text="串口网络桥接工具" FontSize="10.5"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <!-- 三个导航按钮几何属性完全一致：仅外观（激活=Primary）与内容不同。 -->
+                        <ui:Button x:Name="NavMappings" HorizontalAlignment="Stretch" Appearance="Primary" HorizontalContentAlignment="Left"
+                                   Height="46" Padding="13,0" BorderThickness="0" CornerRadius="6" MinWidth="0"
+                                   Click="OnNavDashboard" ToolTip="本机串口映射工作台">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:SymbolIcon Symbol="SerialPort24" FontSize="19" />
+                                <TextBlock Text="串口映射" Margin="13,0,0,0" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button x:Name="NavRemote" HorizontalAlignment="Stretch" Margin="0,12,0,0" Appearance="Transparent" Height="46" Padding="13,0"
+                                   BorderThickness="0" CornerRadius="6" MinWidth="0"
+                                   HorizontalContentAlignment="Left" Click="OnOpenRemoteConnections"
+                                   ToolTip="连接同一局域网内其他 SerialBridge 的 TCP 串口服务">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Desktop24" FontSize="19" />
+                                <TextBlock Text="远程连接" Margin="13,0,0,0" />
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button x:Name="NavSettings" HorizontalAlignment="Stretch" Appearance="Transparent" Height="46" Padding="13,0"
+                                   BorderThickness="0" CornerRadius="6" MinWidth="0" Margin="0,12,0,0"
+                                   HorizontalContentAlignment="Left" Click="OnOpenSettings"
+                                   ToolTip="在主界面内切换到设置页">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Options24" FontSize="19" />
+                                <TextBlock Text="设置" Margin="13,0,0,0" />
+                            </StackPanel>
+                        </ui:Button>
+                    </StackPanel>
+                    <StackPanel DockPanel.Dock="Bottom" Margin="5,10,0,0">
+                        <Border Background="#1816A34A" CornerRadius="8" Padding="11,8">
+                            <TextBlock FontSize="12.5" Foreground="#16A34A" TextTrimming="CharacterEllipsis">
+                                <Run Text="● " /><Run Text="{Binding StatusBadgeText, Mode=OneWay}" />
+                            </TextBlock>
                         </Border>
+                        <StackPanel Orientation="Horizontal" Margin="8,12,0,0">
+                            <ui:SymbolIcon Symbol="ArrowSync24" FontSize="12"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Margin="5,0,0,0" FontSize="11.5" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                <Run Text="v" /><Run Text="{Binding AppVersion, Mode=OneWay}" />
+                            </TextBlock>
+                        </StackPanel>
                     </StackPanel>
-                    <TextBlock Text="串口网络桥接工具 — 物理串口 ↔ TCP/IP 双向透明转发"
-                               FontSize="12.5"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                </StackPanel>
-            </StackPanel>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <ui:Button ToolTip="连接其他 SerialBridge 的串口 TCP 服务" Click="OnOpenRemoteConnections" Appearance="Secondary">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="Desktop24" />
-                        <TextBlock Text="远程 TCP" Margin="6,0,0,0" />
-                    </StackPanel>
-                </ui:Button>
-                <ui:Button ToolTip="Linux 主机访问指南（可复制命令）" Click="OnOpenLinuxAccess" Appearance="Secondary">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="BookGlobe24" />
-                        <TextBlock Text="Linux 访问" Margin="6,0,0,0" />
-                    </StackPanel>
-                </ui:Button>
-                <ui:Button ToolTip="切换深浅主题" Margin="8,0,0,0" Click="OnToggleTheme" Appearance="Secondary">
-                    <ui:SymbolIcon Symbol="DarkTheme24" x:Name="ThemeIcon" />
-                </ui:Button>
-                <ui:Button ToolTip="设置" Margin="8,0,0,0" Click="OnOpenSettings" Appearance="Secondary">
-                    <ui:SymbolIcon Symbol="Options24" />
-                </ui:Button>
-            </StackPanel>
-        </Grid>
-
-        <!-- 统计卡片 -->
-        <UniformGrid Grid.Row="2" Columns="4" Margin="32,12,32,4">
-            <Border Style="{StaticResource StatCardStyle}">
-                <StackPanel Orientation="Horizontal">
-                    <Border Width="38" Height="38" CornerRadius="8" Background="#142563EB">
-                        <ui:SymbolIcon Symbol="PlayCircle24" FontSize="20" Foreground="#2563EB" />
-                    </Border>
-                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Style="{StaticResource StatValueStyle}" Text="{Binding RunningCount, Mode=OneWay}" />
-                        <TextBlock Style="{StaticResource StatLabelStyle}"
-                                   Text="{Binding StatusSummary, Mode=OneWay}" />
-                    </StackPanel>
-                </StackPanel>
+                </DockPanel>
             </Border>
-            <Border Style="{StaticResource StatCardStyle}">
-                <StackPanel Orientation="Horizontal">
-                    <Border Width="38" Height="38" CornerRadius="8" Background="#140E7490">
-                        <ui:SymbolIcon Symbol="PeopleTeam24" FontSize="20" Foreground="#0E7490" />
-                    </Border>
-                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Style="{StaticResource StatValueStyle}" Text="{Binding TotalClients, Mode=OneWay}" />
-                        <TextBlock Style="{StaticResource StatLabelStyle}" Text="TCP 客户端连接" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource StatCardStyle}">
-                <StackPanel Orientation="Horizontal">
-                    <Border Width="38" Height="38" CornerRadius="8" Background="#1416A34A">
-                        <ui:SymbolIcon Symbol="ArrowImport24" FontSize="20" Foreground="#16A34A" />
-                    </Border>
-                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Style="{StaticResource StatValueStyle}" Text="{Binding TotalRxText, Mode=OneWay}" />
-                        <TextBlock Style="{StaticResource StatLabelStyle}" Text="累计接收（设备→网络）" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource StatCardStyle}">
-                <StackPanel Orientation="Horizontal">
-                    <Border Width="38" Height="38" CornerRadius="8" Background="#14B45309">
-                        <ui:SymbolIcon Symbol="ArrowUpload24" FontSize="20" Foreground="#B45309" />
-                    </Border>
-                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Style="{StaticResource StatValueStyle}" Text="{Binding TotalTxText, Mode=OneWay}" />
-                        <TextBlock Style="{StaticResource StatLabelStyle}" Text="累计发送（网络→设备）" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-        </UniformGrid>
 
-        <!-- 工具栏 -->
-        <Grid Grid.Row="3" Margin="32,12,32,12">
-            <StackPanel Orientation="Horizontal">
-                <ui:Button Appearance="Primary" Command="{Binding AddMappingCommand}" MinWidth="118">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="AddCircle24" />
-                        <TextBlock Text="新增映射" Margin="6,0,0,0" />
-                    </StackPanel>
-                </ui:Button>
-                <ui:Button Margin="10,0,0,0" Command="{Binding StartAllCommand}" MinWidth="100">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="PlayCircle24" />
-                        <TextBlock Text="全部启动" Margin="6,0,0,0" />
-                    </StackPanel>
-                </ui:Button>
-                <ui:Button Margin="10,0,0,0" Command="{Binding StopAllCommand}" MinWidth="100">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="RecordStop24" />
-                        <TextBlock Text="全部停止" Margin="6,0,0,0" />
-                    </StackPanel>
-                </ui:Button>
-            </StackPanel>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <ui:SymbolIcon Symbol="Earth24" FontSize="15"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <TextBlock Margin="6,0,0,0" FontSize="12.5" VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                           ToolTip="客户端应使用以下局域网地址连接（而非 0.0.0.0）">
-                    <Run Text="本机局域网地址：" /><Run Text="{Binding LocalIpSummary, Mode=OneWay}" FontWeight="Medium" />
-                </TextBlock>
-                <ui:Button ToolTip="刷新串口列表与网络地址" Margin="14,0,0,0"
-                           Command="{Binding RefreshPortsCommand}">
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="ArrowSync24" />
-                        <TextBlock Text="刷新" Margin="6,0,0,0" />
-                    </StackPanel>
-                </ui:Button>
-            </StackPanel>
-        </Grid>
+            <!-- 右侧工作台底色：与侧边栏拉开层次，窗口不再透出系统背景。 -->
+            <Grid Grid.Column="1" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                <Grid Margin="24,16,24,12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
 
-        <!-- 映射列表 -->
-        <ScrollViewer Grid.Row="4" Margin="32,0,32,0" VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-                <ItemsControl ItemsSource="{Binding Mappings}"
-                              ItemTemplate="{StaticResource MappingCardTemplate}" />
-                <Border Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="28,36"
-                        Visibility="{Binding HasMappings, Converter={StaticResource InverseBoolToVisibility}}">
-                    <StackPanel HorizontalAlignment="Center">
-                        <ui:SymbolIcon Symbol="SerialPort24" FontSize="34"
-                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Text="还没有映射" FontSize="16" Margin="0,12,0,4" HorizontalAlignment="Center"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                        <TextBlock Text="点击“新增映射”，把一个物理串口桥接到 TCP 端口，即可开始通信。" FontSize="13"
-                                   HorizontalAlignment="Center"
-                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                    </StackPanel>
-                </Border>
-            </StackPanel>
-        </ScrollViewer>
+                    <!-- 页头标题随导航页切换；主题/帮助按钮固定右上。 -->
+                    <Grid Grid.Row="0" Margin="0,0,0,16">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="PageTitle" Text="串口映射" FontSize="24" FontWeight="SemiBold" />
+                            </StackPanel>
+                            <TextBlock x:Name="PageSubtitle"
+                                       Text="将本地串口转换为 TCP 服务，支持局域网远程访问与 AI Agent 调试"
+                                       Margin="0,5,0,0" FontSize="12.5"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                            <ui:Button ToolTip="切换深浅主题" Click="OnToggleTheme" Padding="10,7">
+                                <ui:SymbolIcon Symbol="DarkTheme24" x:Name="ThemeIcon" />
+                            </ui:Button>
+                            <ui:Button ToolTip="帮助和使用指南" Margin="8,0,0,0"
+                                       Padding="10,7" Click="OnOpenHelp">
+                                <ui:SymbolIcon Symbol="QuestionCircle24" />
+                            </ui:Button>
+                        </StackPanel>
+                    </Grid>
 
-        <!-- 底部：防火墙提示 + 版本 -->
-        <StackPanel Grid.Row="5" Margin="32,8,32,14">
-            <Border Background="#14B45309" BorderBrush="#55B45309" BorderThickness="1"
-                    CornerRadius="6" Padding="14,10"
-                    Visibility="{Binding FirewallWarningVisible, Converter={StaticResource BoolToVisibility}}">
-                <Grid>
-                    <StackPanel Orientation="Horizontal">
-                        <ui:SymbolIcon Symbol="ShieldTask24" FontSize="17" Foreground="#B45309" />
-                        <TextBlock Margin="10,0,0,0" FontSize="12.5" VerticalAlignment="Center" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}">
-                            <Run Text="尚未检测到本程序的防火墙入站规则。若局域网设备无法连接，请添加放行规则（原始 TCP 透传不含加密与身份认证，请仅在可信局域网使用）。" />
-                        </TextBlock>
+                    <!-- 页面宿主：串口映射（默认） / 远程连接 / 设置，由侧边导航切换，不再弹窗。 -->
+                    <Grid Grid.Row="1">
+                        <Grid x:Name="PageDashboard">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <!-- 统计总览：四色浅染卡片（深浅主题下以透明度叠加，保持可读）。 -->
+                            <UniformGrid Grid.Row="0" Columns="4" Margin="0,0,0,15">
+                        <Border Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="12" Margin="0,0,12,0">
+                            <Border Background="#1A16A34A" CornerRadius="12" Padding="16,14">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="44" Height="44" Background="#2E16A34A" CornerRadius="11">
+                                        <ui:SymbolIcon Symbol="LinkMultiple24" Foreground="#16A34A" FontSize="22" />
+                                    </Border>
+                                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="运行映射" FontSize="11.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding RunningCount}" FontWeight="Bold" FontSize="20" />
+                                            <TextBlock Text=" / " FontWeight="Bold" FontSize="20" />
+                                            <TextBlock Text="{Binding TotalCount}" FontWeight="Bold" FontSize="20" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </Border>
+                        <Border Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="12" Margin="0,0,12,0">
+                            <Border Background="#1A2563EB" CornerRadius="12" Padding="16,14">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="44" Height="44" Background="#2E2563EB" CornerRadius="11">
+                                        <ui:SymbolIcon Symbol="PeopleTeam24" Foreground="#2563EB" FontSize="22" />
+                                    </Border>
+                                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="在线客户端" FontSize="11.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="{Binding TotalClients}" FontWeight="Bold" FontSize="20" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </Border>
+                        <Border Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="12" Margin="0,0,12,0">
+                            <Border Background="#1A16A34A" CornerRadius="12" Padding="16,14">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="44" Height="44" Background="#2E16A34A" CornerRadius="11">
+                                        <ui:SymbolIcon Symbol="ArrowImport24" Foreground="#16A34A" FontSize="22" />
+                                    </Border>
+                                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="累计接收" FontSize="11.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="{Binding TotalRxText}" FontWeight="Bold" FontSize="19" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </Border>
+                        <Border Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="12" Margin="0,0,12,0">
+                            <Border Background="#1AEA580C" CornerRadius="12" Padding="16,14">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="44" Height="44" Background="#2EEA580C" CornerRadius="11">
+                                        <ui:SymbolIcon Symbol="ArrowUpload24" Foreground="#EA580C" FontSize="22" />
+                                    </Border>
+                                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="累计发送" FontSize="11.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="{Binding TotalTxText}" FontWeight="Bold" FontSize="19" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </Border>
+                    </UniformGrid>
+
+                            <!-- 操作区：IP 地址默认收起，真实地址通过弹出列表显示。 -->
+                            <Grid Grid.Row="1" Margin="0,0,0,14">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button Appearance="Primary" Command="{Binding AddMappingCommand}" MinWidth="116">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="AddCircle24" />
+                                    <TextBlock Text="新增映射" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </ui:Button>
+                            <ui:Button Margin="10,0,0,0" Command="{Binding StartAllCommand}"
+                                       ToolTip="无勾选时启动全部映射；有勾选时只启动所选">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="PlayCircle24" />
+                                    <TextBlock Text="{Binding StartAllText}" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </ui:Button>
+                            <ui:Button Margin="10,0,0,0" Command="{Binding StopAllCommand}"
+                                       ToolTip="无勾选时停止全部映射；有勾选时只停止所选">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="RecordStop24" />
+                                    <TextBlock Text="{Binding StopAllText}" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </ui:Button>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <ui:Button x:Name="LocalIpsButton" ToolTip="{Binding LocalIpSummary}"
+                                       Click="OnShowLocalIps" Padding="10,7">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Earth24" />
+                                    <TextBlock Text="{Binding LocalIpsText}" Margin="6,0,0,0" />
+                                    <ui:SymbolIcon Symbol="ChevronDown24" FontSize="12" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </ui:Button>
+                            <ui:Button Margin="9,0,0,0" Command="{Binding RefreshPortsCommand}" ToolTip="刷新串口和网络地址">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="ArrowSync24" />
+                                    <TextBlock Text="刷新" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </ui:Button>
+                        </StackPanel>
+                        <Popup x:Name="LocalIpPopup" PlacementTarget="{Binding ElementName=LocalIpsButton}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Background="{DynamicResource PopupSurfaceBrush}"
+                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,6,0,0" MaxWidth="440">
+                                <StackPanel>
+                                    <ItemsControl ItemsSource="{Binding LocalIpList}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal" Margin="0,3">
+                                                    <ui:SymbolIcon Symbol="Earth24" FontSize="14" VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                    <TextBlock Text="{Binding}" Margin="8,0,0,0" FontSize="13" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                        客户端请使用可到达的本机 IP 与映射监听的 TCP 端口；0.0.0.0 表示监听所有网卡，并非客户端目标地址。
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </Grid>
+
+                    <!-- 表头与数据行处于同一个滚动视口：出现纵向滚动条时统一缩窄内容，
+                         避免各自计算星号列宽造成错位。横向滚动仍可访问右侧操作。 -->
+                    <Border Grid.Row="2" x:Name="MappingTable"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="9" Background="{DynamicResource ControlFillColorDefaultBrush}">
+                        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Border Grid.Row="0" Padding="8,12"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+                                    <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="36" />
+                                        <ColumnDefinition Width="4*" MinWidth="96" />
+                                        <ColumnDefinition Width="1.55*" MinWidth="88" />
+                                        <ColumnDefinition Width="1.8*" MinWidth="112" />
+                                        <ColumnDefinition Width="1.4*" MinWidth="88" />
+                                        <ColumnDefinition Width="1.0*" MinWidth="84" />
+                                        <ColumnDefinition Width="{Binding RowActionsLevel, RelativeSource={RelativeSource AncestorType=ui:FluentWindow}, Converter={StaticResource RowActionsLevelToWidth}}" />
+                                    </Grid.ColumnDefinitions>
+                                        <CheckBox Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  MinWidth="0" MinHeight="0" Padding="0"
+                                                  IsChecked="{Binding AllSelected}" ToolTip="全选后可批量启动/停止" />
+                                        <TextBlock Grid.Column="1" Text="映射名称" Margin="14,0,0,0" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="2" Text="串口配置" Margin="4,0,0,0" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="3" Text="TCP 服务" Margin="4,0,0,0" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="4" Text="流量（累计）" Margin="4,0,0,0" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="5" Text="状态" Margin="4,0,0,0" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="6" Text="操作" Margin="2,0,0,0" FontWeight="SemiBold" />
+                                    </Grid>
+                                </Border>
+                                <StackPanel Grid.Row="1">
+                                        <ItemsControl ItemsSource="{Binding Mappings}" ItemTemplate="{StaticResource MappingCardTemplate}" />
+                                        <StackPanel Margin="0,35" HorizontalAlignment="Center"
+                                                    Visibility="{Binding HasMappings, Converter={StaticResource InverseBoolToVisibility}}">
+                                            <ui:SymbolIcon Symbol="SerialPort24" FontSize="32" HorizontalAlignment="Center" />
+                                            <TextBlock Text="还没有串口映射" FontSize="15" Margin="0,12,0,5" HorizontalAlignment="Center" />
+                                            <TextBlock Text="点击上方“新增映射”开始配置" FontSize="12"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </ScrollViewer>
+                    </Border>
+
+                    <StackPanel Grid.Row="3" Margin="0,9,0,0">
+                        <Border Background="#14B45309" BorderBrush="#55B45309" BorderThickness="1"
+                                CornerRadius="6" Padding="10,8"
+                                Visibility="{Binding FirewallWarningVisible, Converter={StaticResource BoolToVisibility}}">
+                            <DockPanel LastChildFill="True">
+                                <ui:Button DockPanel.Dock="Right" Appearance="Caution"
+                                           Content="添加防火墙规则" Command="{Binding AddFirewallRuleCommand}" />
+                                <TextBlock FontSize="11.5" TextWrapping="Wrap" VerticalAlignment="Center">
+                                    未检测到本程序防火墙入站规则。TCP 透传不含认证或加密，仅在可信局域网使用。
+                                </TextBlock>
+                            </DockPanel>
+                        </Border>
+                        <Grid Margin="0,7,0,0">
+                            <TextBlock HorizontalAlignment="Left" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Text="{Binding RefreshedAtText}" />
+                            <TextBlock HorizontalAlignment="Right" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                <Hyperlink NavigateUri="https://github.com/SuperStrain/SerialBridge"
+                                           RequestNavigate="OnOpenGitHub" Foreground="#2563EB">
+                                    GitHub 开源地址
+                                </Hyperlink>
+                            </TextBlock>
+                        </Grid>
                     </StackPanel>
-                    <ui:Button HorizontalAlignment="Right" Appearance="Caution"
-                               Content="添加防火墙规则" Command="{Binding AddFirewallRuleCommand}" />
+                        </Grid>
+                        <views:RemoteConnectionsView x:Name="PageRemote" Visibility="Collapsed" />
+                        <views:SettingsPage x:Name="PageSettings" Visibility="Collapsed" />
+                    </Grid>
                 </Grid>
-            </Border>
-            <Grid Margin="0,10,0,0">
-                <TextBlock FontSize="11.5" HorizontalAlignment="Right"
-                           Foreground="{DynamicResource TextFillColorTertiaryBrush}">
-                    <Run Text="SerialBridge v" /><Run Text="{Binding AppVersion, Mode=OneWay}" />
-                    <Run Text=" · 数据目录 " /><Run Text="{Binding DataDirText, Mode=OneWay}" />
-                    <Run Text=" · " />
-                    <Hyperlink NavigateUri="https://github.com/SuperStrain/SerialBridge"
-                               RequestNavigate="OnOpenGitHub"
-                               Foreground="#2563EB" ToolTip="在 GitHub 上查看源码与提交问题">
-                        <Run Text="GitHub 开源地址" />
-                    </Hyperlink>
-                </TextBlock>
-                <TextBlock FontSize="11.5" HorizontalAlignment="Left"
-                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                           Text="{Binding RefreshedAtText, Mode=OneWay}" />
             </Grid>
-        </StackPanel>
+        </Grid>
     </Grid>
 </ui:FluentWindow>

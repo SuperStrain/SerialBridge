@@ -42,7 +42,7 @@ public partial class TerminalViewModel : ObservableObject
         RxBytes = _session.ReceivedBytes;
         TxText = MappingViewModel.FormatBytes(TxBytes);
         RxText = MappingViewModel.FormatBytes(RxBytes);
-        StateText = _session.IsConnected ? "已连接 — 逐键透传中" : "连接已断开 — 请重新连接";
+        StateText = _session.IsConnected ? "已连接" : "连接已断开";
     }
 
     public void NoteSent(int bytesCount) => OnStatusChanged();

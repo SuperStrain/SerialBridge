@@ -29,7 +29,7 @@ public sealed class TerminalIdentityTests
             Assert.Contains("192.168.1.20:9002", vm.Title);
             Assert.DoesNotContain("旧设备", vm.Title);
             Assert.DoesNotContain("192.168.1.10", vm.Title);
-            Assert.Equal("已连接 — 逐键透传中", vm.StateText);
+            Assert.Equal("已连接", vm.StateText);
         }
         finally { vm.Detach(); }
     }
