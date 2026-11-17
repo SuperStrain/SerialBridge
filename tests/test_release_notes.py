@@ -113,7 +113,7 @@ class ChineseReleaseNotesTests(unittest.TestCase):
             stream.flush()
             message = stream.buffer.getvalue().decode("cp1252")
         self.assertIn("Release notes written:", message)
-        self.assertIn("dist/release-notes.md", message)
+        self.assertIn(str(Path("dist/release-notes.md")), message)
 
     def test_release_status_keeps_chinese_with_utf8_stdout(self):
         stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
