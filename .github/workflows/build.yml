@@ -224,6 +224,8 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: '1'
         run: |
           $ErrorActionPreference = 'Stop'
           python scripts/generate_release_notes.py --tag "v${{ steps.version.outputs.version }}" --output dist/release-notes.md
