@@ -187,6 +187,16 @@ def render(tag: str, prior: str | None, changes: list[dict[str, str]],
     return "\n".join(lines) + "\n"
 
 
+def print_release_status(output: Path, count: int) -> None:
+    """A non-UTF-8 CI stdout must never turn a successful write into a failed release."""
+    try:
+        print(f"已生成中文发布说明：{output}（{count} 项变更）")
+    except UnicodeEncodeError:
+        # Older Windows runners can expose cp1252 stdout, even though the
+        # release notes file above was written successfully using UTF-8.
+        print(f"Release notes written: {output} ({count} changes)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True, help="例如 v1.3.18")
@@ -214,7 +224,7 @@ def main() -> None:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(result, encoding="utf-8")
-    print(f"已生成中文发布说明：{output}（{len(changes)} 项变更）")
+    print_release_status(output, len(changes))
 
 
 if __name__ == "__main__":
