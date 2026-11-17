@@ -60,16 +60,20 @@ Regular TCP clients and human-operated terminals work too. **SerialBridge is a t
 Computer A: SerialBridge remote TCP terminal ⇄ LAN / raw TCP ⇄ Computer B: 192.168.1.100:9001 → COM3 → device
 ```
 
+<div align="center">
+  <img src="docs/assets/serialbridge-remote-topology-en.svg" alt="Two SerialBridge computers with raw TCP serial transport and optional UDP discovery" width="100%" />
+</div>
+
 **Discover and connect**
 
 1. On computer B, start the `COM3 → TCP 9001` mapping, bound to a LAN-accessible interface.
 2. On B, explicitly enable **Settings → LAN discovery → Allow other SerialBridge instances to discover this computer**. The setting is **off by default**.
-3. On A, open **Remote TCP → Scan LAN** to see the visible host, IP, mapping name, COM port, serial settings and TCP port.
+3. On A, open **Remote connections → Scan LAN** to see the visible host, IP, mapping name, COM port, serial settings and TCP port.
 4. Choose a mapping and click **Save and Connect** to launch the shared terminal.
 
 **Connect manually**
 
-On A, open **Remote TCP → Saved connections**, enter B's IP/hostname and TCP port, save, and choose **Connect → Terminal**. Optional reconnect and connect-at-startup switches are **off by default**. Closing a terminal view keeps the TCP connection active; use **Disconnect** to close it.
+On A, open **Remote connections → Saved connections**, enter B's IP/hostname and TCP port, save, and choose **Connect → Terminal**. Optional reconnect and connect-at-startup switches are **off by default**. Closing a terminal view keeps the TCP connection active; use **Disconnect** to close it.
 
 > Discovery uses **UDP port 39001** within the same IPv4 broadcast domain; host firewalls or network isolation may prevent scanning. Manual IP/port connections remain available even when discovery is disabled. **This is raw TCP serial transport, not an SSH/Telnet server.** The remote host controls COM parameters; commands are never replayed automatically after reconnect.
 
@@ -109,7 +113,7 @@ Visit [**GitHub Releases**](https://github.com/SuperStrain/SerialBridge/releases
 ### Requirements
 
 - **Windows 10 1809 or newer / Windows 11, x64** (the targeted platform; compatibility with older Windows installations should be verified on real machines)
-- An available COM port; USB-to-serial adapters may require their vendor-supplied drivers
+- **Serving a local COM mapping** requires a physical COM port and possibly a USB-to-serial vendor driver. **Using only the outgoing TCP client does not require a local COM port.**
 - Self-contained deployment: **no separate .NET Runtime installation required**
 - The embedded terminal uses **Microsoft Edge WebView2 Runtime**; install [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) if it is missing
 
@@ -147,46 +151,57 @@ Open the mapping's **Serial Terminal** → **Quick Commands / Macros** → **Edi
 ## 🏗️ Architecture
 
 ```mermaid
-flowchart TB
-    subgraph APP["SerialBridge.App · C# / WPF / MVVM"]
-        direction LR
-        UI["Mappings / Settings"]
-        TERM["Serial Terminal<br/>WebView2 + xterm.js"]
-        MON["Traffic Monitor / Logs"]
-        MACRO["Quick Commands / Macros"]
-        TRAY["System Tray / Updates"]
+flowchart LR
+    subgraph APP["SerialBridge.App · WPF / MVVM"]
+        UI["Mappings / Remote connections / Settings"]
+        TERM["Shared terminal<br/>WebView2 + xterm.js"]
+        MACRO["Quick commands / Macros"]
+        MON["Local mapping monitor / Logs"]
     end
-
     subgraph CORE["SerialBridge.Core · .NET 8"]
-        direction TB
-        MANAGER["MappingManager<br/>Lifecycle"]
-        RUNTIME["MappingRuntime<br/>Bidirectional bridge"]
-        SERIAL["SerialPortDevice"]
-        TCP["TcpServerService"]
-        SUPPORT["ConfigStore · Capture · Logging"]
-        MANAGER --> RUNTIME
-        RUNTIME <--> SERIAL
-        RUNTIME <--> TCP
-        SUPPORT -.-> RUNTIME
+        subgraph HOST["Local serial server"]
+            MM["MappingManager"] --> MR["MappingRuntime"]
+            MR <--> SP["SerialPortDevice"]
+            MR <--> TS["TcpServerService"]
+        end
+        subgraph REMOTE["Outgoing TCP client"]
+            RM["RemoteConnectionManager"] --> RS["RemoteTcpSession"]
+        end
+        subgraph DISCOVERY["Optional LAN discovery"]
+            SCAN["LanDiscoveryScanner"]
+            RESP["LanDiscoveryResponder"]
+        end
+        SESSION["ITerminalSession<br/>Local / remote terminal abstraction"]
+        STORE["ConfigStore · Capture · Logging"]
     end
-
-    UI --> MANAGER
-    TERM <--> RUNTIME
-    MON -.-> RUNTIME
-    MACRO --> RUNTIME
-    TRAY -.-> MANAGER
-    SERIAL <--> DEVICE["Physical COM / Device"]
-    TCP <--> CLIENT["LAN TCP Client / AI Agent"]
+    UI --> MM
+    UI --> RM
+    UI --> SCAN
+    UI --> STORE
+    TERM <--> SESSION
+    MACRO --> SESSION
+    MON -.-> MR
+    SESSION <--> MR
+    SESSION <--> RS
+    SP <--> DEVICE["Local COM / Device"]
+    TS <--> CLIENT["LAN TCP client / AI Agent"]
+    RS <--> SERVER["Remote raw TCP serial server"]
+    SCAN -. "UDP 39001 query" .-> RESP
+    RESP -. "Discovery is opt-in" .-> SCAN
+    STORE -.-> MM
+    STORE -.-> RM
 
     classDef app fill:#e8f0ff,stroke:#477dd6,color:#123d81
     classDef core fill:#eff6ff,stroke:#6c97c9,color:#15375d
     classDef edge fill:#e7f7ee,stroke:#3a9e72,color:#185c3e
-    class UI,TERM,MON,MACRO,TRAY app
-    class MANAGER,RUNTIME,SERIAL,TCP,SUPPORT core
-    class DEVICE,CLIENT edge
+    class UI,TERM,MACRO,MON app
+    class MM,MR,SP,TS,RM,RS,SCAN,RESP,SESSION,STORE core
+    class DEVICE,CLIENT,SERVER edge
 ```
 
 - **Language & UI:** C#, .NET 8, WPF, WPF-UI, CommunityToolkit.Mvvm
+- **Two roles in one app:** SerialBridge can expose local COM ports over TCP and initiate outgoing raw TCP serial sessions. `ITerminalSession` lets the terminal work with local and remote connections.
+- **Optional discovery:** `LanDiscoveryScanner` and `LanDiscoveryResponder` use UDP 39001 to exchange available mapping metadata with opted-in hosts; serial payloads still travel over raw TCP.
 - **Serial & networking:** `System.IO.Ports`, `TcpListener` / Socket, `System.Threading.Channels`
 - **Terminal:** WebView2 + xterm.js
 - **Testing & packaging:** xUnit, simulated serial streams, GitHub Actions, Inno Setup
