@@ -1,27 +1,23 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
+using System.Windows.Controls;
 using SerialBridge.App.Services;
 using SerialBridge.Core.Logging;
-using SerialBridge.Core.Models;
-using Wpf.Ui.Controls;
 using MessageBox = System.Windows.MessageBox;
 using MessageBoxButton = System.Windows.MessageBoxButton;
 using MessageBoxImage = System.Windows.MessageBoxImage;
 
 namespace SerialBridge.App.Views;
 
-public partial class SettingsWindow : FluentWindow
+/// <summary>主窗口内嵌的设置页面，直接读写全局 Settings（属性 setter 即时保存）。</summary>
+public partial class SettingsPage : UserControl
 {
     private readonly SettingsViewModel _viewModel = new();
 
-    public SettingsWindow(Window? owner)
+    public SettingsPage()
     {
         InitializeComponent();
-        Owner = owner;
-        _viewModel.UpdateService = new SerialBridge.App.Services.UpdateService(new SerialBridge.App.Services.AppUpdateEnvironment());
+        _viewModel.UpdateService = new UpdateService(new AppUpdateEnvironment());
         _viewModel.AutoCheckUpdates = AppServices.Settings.General.AutoCheckUpdates;
         DataContext = _viewModel;
     }
@@ -40,8 +36,6 @@ public partial class SettingsWindow : FluentWindow
         }
     }
 
-    private void OnClose(object sender, RoutedEventArgs e) => Close();
-
     private void OnOpenGitHub(object sender, RoutedEventArgs e)
     {
         try
@@ -56,10 +50,10 @@ public partial class SettingsWindow : FluentWindow
     }
 }
 
-/// <summary>设置窗口 ViewModel：直接读写全局 Settings，关闭时由属性 setter 保存。</summary>
-public partial class SettingsViewModel : ObservableObject
+/// <summary>设置 ViewModel：直接读写全局 Settings，关闭时由属性 setter 保存。</summary>
+public partial class SettingsViewModel : CommunityToolkit.Mvvm.ComponentModel.ObservableObject
 {
-    private readonly GeneralSettings _general;
+    private readonly SerialBridge.Core.Models.GeneralSettings _general;
 
     public SettingsViewModel()
     {
@@ -69,10 +63,10 @@ public partial class SettingsViewModel : ObservableObject
         _allowLanDiscovery = _general.AllowLanDiscovery;
     }
 
-    [ObservableProperty] private int _themeIndex;
-    [ObservableProperty] private bool _launchOnStartup = StartupHelper.IsLaunchOnStartupEnabled();
-    [ObservableProperty] private bool _restoreMappingsOnStartup;
-    [ObservableProperty] private bool _allowLanDiscovery;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private int _themeIndex;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private bool _launchOnStartup = StartupHelper.IsLaunchOnStartupEnabled();
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private bool _restoreMappingsOnStartup;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private bool _allowLanDiscovery;
     private bool _restoringDiscoverySetting;
     private int _discoveryChangeVersion;
 
@@ -88,7 +82,7 @@ public partial class SettingsViewModel : ObservableObject
         {
             // Ignore stale failures if a newer user choice is already queued.
             if (version != _discoveryChangeVersion) return;
-            System.Windows.MessageBox.Show("局域网发现服务切换失败：" + ex.Message, "设置",
+            MessageBox.Show("局域网发现服务切换失败：" + ex.Message, "设置",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             _restoringDiscoverySetting = true;
             try { AllowLanDiscovery = _general.AllowLanDiscovery; }
@@ -100,8 +94,8 @@ public partial class SettingsViewModel : ObservableObject
 
     public Services.UpdateService? UpdateService { get; set; }
 
-    [ObservableProperty] private bool _autoCheckUpdates = true;
-    [ObservableProperty] private string _updateStatusText = "";
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private bool _autoCheckUpdates = true;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string _updateStatusText = "";
 
     partial void OnAutoCheckUpdatesChanged(bool value)
     {
@@ -109,7 +103,7 @@ public partial class SettingsViewModel : ObservableObject
         AppServices.SaveSettingsSafe();
     }
 
-    [RelayCommand]
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
     private async Task CheckUpdatesAsync()
     {
         if (UpdateService is null) return;
