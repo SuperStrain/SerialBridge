@@ -104,6 +104,25 @@ class ChineseReleaseNotesTests(unittest.TestCase):
             published = notes.published_release_tags("SuperStrain/SerialBridge", "test-token")
         self.assertEqual("v1.3.17", notes.previous_tag("v1.3.19", published))
 
+    def test_release_status_does_not_fail_on_windows_cp1252_stdout(self):
+        # Package artifacts and the UTF-8 notes file must not be discarded just
+        # because a CI runner cannot encode the Chinese confirmation message.
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        with patch("sys.stdout", stream):
+            notes.print_release_status(Path("dist/release-notes.md"), 3)
+            stream.flush()
+            message = stream.buffer.getvalue().decode("cp1252")
+        self.assertIn("Release notes written:", message)
+        self.assertIn(str(Path("dist/release-notes.md")), message)
+
+    def test_release_status_keeps_chinese_with_utf8_stdout(self):
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        with patch("sys.stdout", stream):
+            notes.print_release_status(Path("dist/release-notes.md"), 3)
+            stream.flush()
+            message = stream.buffer.getvalue().decode("utf-8")
+        self.assertIn("已生成中文发布说明", message)
+
     def test_missing_release_api_credentials_fails_closed(self):
         with self.assertRaises(RuntimeError):
             notes.published_release_tags("SuperStrain/SerialBridge", "")
