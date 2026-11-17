@@ -61,16 +61,20 @@ SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供
 远程 TCP → 终端 / 快捷命令    ⇄   局域网 TCP   ⇄   192.168.1.100:9001 → COM3 → 开发板
 ```
 
+<div align="center">
+  <img src="docs/assets/serialbridge-remote-topology-zh.svg" alt="两台 SerialBridge 的原始 TCP 数据通道与可选 UDP 自动发现拓扑" width="100%" />
+</div>
+
 **方式一：自动发现并连接（推荐）**
 
 1. 在电脑 B 新建并启动 `COM3 → TCP 9001` 映射，确保监听地址允许局域网访问。
 2. 电脑 B 打开 **设置 → 局域网发现**，主动开启 **允许被局域网内的 SerialBridge 发现**。此开关**默认关闭**，只有开启后才响应 UDP 扫描。
-3. 电脑 A 在主窗口点击 **远程 TCP** → **扫描局域网**，查看发现的电脑名称、IP、映射名称、COM、TCP 端口和串口参数。
+3. 电脑 A 在主窗口左侧点击 **远程连接** → **扫描局域网**，查看发现的电脑名称、IP、映射名称、COM、TCP 端口和串口参数。
 4. 选择目标 COM 映射，点击 **保存并连接**，软件建立原始 TCP 会话并打开终端。
 
 **方式二：手动连接**
 
-不想开放设备发现时，在电脑 A 的 **远程 TCP → 已保存连接** 输入连接名称、电脑 B 的 IP / 主机名和 TCP 端口，保存后点击 **连接 → 终端**。可按需打开自动重连与启动时连接；**默认均关闭**。关闭终端窗口不会断开 TCP，使用连接列表的 **断开** 才会结束会话。
+不想开放设备发现时，在电脑 A 的 **远程连接 → 已保存连接** 输入连接名称、电脑 B 的 IP / 主机名和 TCP 端口，保存后点击 **连接 → 终端**。可按需打开自动重连与启动时连接；**默认均关闭**。关闭终端窗口不会断开 TCP，使用连接列表的 **断开** 才会结束会话。
 
 > **协议与网络边界：** 数据通道始终是**原始 TCP 字节透传**，不使用 SSH/Telnet 协议、虚拟 COM 驱动或远程控制 API。串口波特率等参数由电脑 B 设置。自动发现使用同一 IPv4 广播域中的 **UDP 39001**，可能受到 Windows 防火墙、网卡和 VLAN 的限制；扫描失败仍可手动连接。只列出远端正在监听、可供局域网访问的映射。网络中断后不会自动重发未完成的命令。
 
@@ -148,46 +152,57 @@ picocom /tmp/ttydev
 ## 🏗️ 技术架构
 
 ```mermaid
-flowchart TB
-    subgraph APP["SerialBridge.App · C# / WPF / MVVM"]
-        direction LR
-        UI["映射管理 / 设置"]
-        TERM["串口终端<br/>WebView2 + xterm.js"]
-        MON["数据监控 / 日志展示"]
+flowchart LR
+    subgraph APP["SerialBridge.App · WPF / MVVM"]
+        UI["串口映射 / 远程连接 / 设置"]
+        TERM["统一串口终端<br/>WebView2 + xterm.js"]
         MACRO["快捷命令 / 宏"]
-        TRAY["托盘 / 自动更新"]
+        MON["本机映射监控 / 日志"]
     end
-
     subgraph CORE["SerialBridge.Core · .NET 8"]
-        direction TB
-        MANAGER["MappingManager<br/>映射与生命周期"]
-        RUNTIME["MappingRuntime<br/>双向数据转发"]
-        SERIAL["SerialPortDevice"]
-        TCP["TcpServerService"]
-        SUPPORT["ConfigStore · Capture · Logging"]
-        MANAGER --> RUNTIME
-        RUNTIME <--> SERIAL
-        RUNTIME <--> TCP
-        SUPPORT -.-> RUNTIME
+        subgraph HOST["本机串口服务端"]
+            MM["MappingManager"] --> MR["MappingRuntime"]
+            MR <--> SP["SerialPortDevice"]
+            MR <--> TS["TcpServerService"]
+        end
+        subgraph REMOTE["远程 TCP 客户端"]
+            RM["RemoteConnectionManager"] --> RS["RemoteTcpSession"]
+        end
+        subgraph DISCOVERY["可选局域网发现"]
+            SCAN["LanDiscoveryScanner"]
+            RESP["LanDiscoveryResponder"]
+        end
+        SESSION["ITerminalSession<br/>本机 / 远程终端抽象"]
+        STORE["ConfigStore · Capture · Logging"]
     end
-
-    UI --> MANAGER
-    TERM <--> RUNTIME
-    MON -.-> RUNTIME
-    MACRO --> RUNTIME
-    TRAY -.-> MANAGER
-    SERIAL <--> DEVICE["物理串口 / 开发板"]
-    TCP <--> CLIENT["局域网 TCP 客户端 / AI Agent"]
+    UI --> MM
+    UI --> RM
+    UI --> SCAN
+    UI --> STORE
+    TERM <--> SESSION
+    MACRO --> SESSION
+    MON -.-> MR
+    SESSION <--> MR
+    SESSION <--> RS
+    SP <--> DEVICE["本机 COM / 开发板"]
+    TS <--> CLIENT["局域网 TCP 客户端 / AI Agent"]
+    RS <--> SERVER["远端原始 TCP 串口服务"]
+    SCAN -. "UDP 39001 查询" .-> RESP
+    RESP -. "需显式开启发现" .-> SCAN
+    STORE -.-> MM
+    STORE -.-> RM
 
     classDef app fill:#e8f0ff,stroke:#477dd6,color:#123d81
     classDef core fill:#eff6ff,stroke:#6c97c9,color:#15375d
     classDef edge fill:#e7f7ee,stroke:#3a9e72,color:#185c3e
-    class UI,TERM,MON,MACRO,TRAY app
-    class MANAGER,RUNTIME,SERIAL,TCP,SUPPORT core
-    class DEVICE,CLIENT edge
+    class UI,TERM,MACRO,MON app
+    class MM,MR,SP,TS,RM,RS,SCAN,RESP,SESSION,STORE core
+    class DEVICE,CLIENT,SERVER edge
 ```
 
 - **语言与框架：** C#、.NET 8、WPF、WPF-UI、CommunityToolkit.Mvvm
+- **双角色：** 同一个 SerialBridge 既可提供本机 COM→TCP 服务，也可主动连接其他原始 TCP 串口服务；内置终端通过 `ITerminalSession` 抽象支持本机和远程会话。
+- **可选发现：** `LanDiscoveryScanner` 与 `LanDiscoveryResponder` 通过 UDP 39001 交换可用映射元数据，只有手动允许发现的服务端才响应；串口数据始终通过原始 TCP 传输。
 - **串口与网络：** `System.IO.Ports`、`TcpListener` / Socket、`System.Threading.Channels`
 - **终端：** WebView2 + xterm.js
 - **测试与发布：** xUnit、模拟串口、GitHub Actions、Inno Setup
