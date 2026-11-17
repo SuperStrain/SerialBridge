@@ -114,7 +114,7 @@ python3 skills/serial-tcp-uart/scripts/serial_session.py \
 ### 系统要求
 
 - **Windows 10 1809 或更新版本 / Windows 11，x64**（项目目标平台；低版本 Windows 兼容性请以实际测试为准）
-- 需要一个可用的物理 COM 端口；USB 转串口适配器可能需要厂商驱动
+- **本机串口服务端**需要可用的物理 COM 端口，USB 转串口适配器可能需要厂商驱动；**仅作为远程 TCP 客户端时不需要本机 COM 端口
 - 自包含发布，**无需另外安装 .NET Runtime**
 - 内置终端使用 Microsoft Edge **WebView2 Runtime**；缺失时需安装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
 
