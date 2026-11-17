@@ -74,5 +74,12 @@ public partial class App : Application
             _ => ApplicationTheme.Light,
         };
         ApplicationThemeManager.Apply(mode);
+
+        // WPF-UI 的填充刷子带透明度，弹层需要完全不透明的底色才可读；
+        // 这里按主题维护一个纯色刷子供弹层使用。
+        var surface = mode == ApplicationTheme.Dark
+            ? System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20)
+            : System.Windows.Media.Color.FromRgb(0xFF, 0xFF, 0xFF);
+        Current.Resources["PopupSurfaceBrush"] = new System.Windows.Media.SolidColorBrush(surface);
     }
 }

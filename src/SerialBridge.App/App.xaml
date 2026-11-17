@@ -18,6 +18,9 @@
             <conv:ZeroIndexToBoolConverter x:Key="ZeroIndexToBool" />
             <conv:BytesToTextConverter x:Key="BytesToText" />
             <conv:StringToBrushConverter x:Key="StringToBrush" />
+            <conv:IntAtLeastToVisibilityConverter x:Key="IntAtLeastToVisibility" />
+            <conv:IntBelowToVisibilityConverter x:Key="IntBelowToVisibility" />
+            <conv:RowActionsLevelToWidthConverter x:Key="RowActionsLevelToWidth" />
             <conv:BoolToRunTextConverter x:Key="BoolToRunText" />
             <conv:RunToAppearanceConverter x:Key="RunToAppearance" />
             <conv:BoolToWeightConverter x:Key="BoolToWeight" />

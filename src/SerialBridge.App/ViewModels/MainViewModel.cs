@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SerialBridge.App.Services;
@@ -26,7 +27,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _totalRxText = "0 B";
     [ObservableProperty] private string _totalTxText = "0 B";
     [ObservableProperty] private string _statusSummary = "未运行任何映射";
+    [ObservableProperty] private string _statusBadgeText = "";
     [ObservableProperty] private string _localIpSummary = "";
+    [ObservableProperty] private string _localIpsText = "";
+    [ObservableProperty] private int _localIpCount;
+    [ObservableProperty] private IReadOnlyList<string> _localIpList = Array.Empty<string>();
+    [ObservableProperty] private int _selectedCount;
     [ObservableProperty] private bool _hasMappings;
     [ObservableProperty] private bool _firewallWarningVisible;
     [ObservableProperty] private bool _updateBadgeVisible;
@@ -36,6 +42,34 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _refreshedAtText = "";
     [ObservableProperty] private string _dataDirText = Core.Logging.LogService.AppDataDir;
     [ObservableProperty] private string _appVersion = Services.AppServices.AppVersion;
+
+    /// <summary>批量按钮文案：有勾选时作用于所选映射，避免"全部"字样产生歧义。</summary>
+    public string StartAllText => SelectedCount > 0 ? $"启动所选 ({SelectedCount})" : "全部启动";
+    public string StopAllText => SelectedCount > 0 ? $"停止所选 ({SelectedCount})" : "全部停止";
+
+    /// <summary>表头全选框：全选时勾起，随行勾选联动刷新。</summary>
+    public bool AllSelected
+    {
+        get => Mappings.Count > 0 && Mappings.All(m => m.IsSelected);
+        set
+        {
+            foreach (var m in Mappings) m.IsSelected = value;
+            OnPropertyChanged();
+        }
+    }
+
+    partial void OnSelectedCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(StartAllText));
+        OnPropertyChanged(nameof(StopAllText));
+        OnPropertyChanged(nameof(AllSelected));
+    }
+
+    private void OnMappingSelectionChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MappingViewModel.IsSelected))
+            SelectedCount = Mappings.Count(m => m.IsSelected);
+    }
 
     private readonly DispatcherTimerEx _timer;
     private DispatcherTimerEx _updateTimer;
@@ -48,7 +82,7 @@ public partial class MainViewModel : ObservableObject
 
         // 每秒刷新统计与状态摘要
         _timer = new DispatcherTimerEx(TimeSpan.FromSeconds(1), RefreshStats);
-        LocalIpSummary = BuildLocalIpSummary();
+        RefreshLocalIps();
         CheckFirewall();
         RebuildMappings();
         RefreshStats();
@@ -106,10 +140,13 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private static string BuildLocalIpSummary()
+    private void RefreshLocalIps()
     {
-        var ips = NetworkInfo.GetLocalIPv4Addresses();
-        return ips.Count > 0 ? string.Join("  ", ips.Select(ip => ip.ToString())) : "未检测到局域网地址";
+        var ips = NetworkInfo.GetLocalIPv4Addresses().Select(ip => ip.ToString()).ToList();
+        LocalIpList = ips;
+        LocalIpCount = ips.Count;
+        LocalIpsText = ips.Count > 0 ? $"本机 IPv4：{ips.Count} 个地址" : "本机 IPv4：未检测到";
+        LocalIpSummary = ips.Count > 0 ? string.Join("  ", ips) : "未检测到局域网地址";
     }
 
     // ---------- 映射列表维护 ----------
@@ -121,12 +158,21 @@ public partial class MainViewModel : ObservableObject
         for (var i = Mappings.Count - 1; i >= 0; i--)
         {
             var idx = runtimes.FindIndex(r => ReferenceEquals(r, Mappings[i].Runtime));
-            if (idx < 0) Mappings.RemoveAt(i);
+            if (idx < 0)
+            {
+                Mappings[i].PropertyChanged -= OnMappingSelectionChanged;
+                Mappings.RemoveAt(i);
+            }
         }
         foreach (var rt in runtimes)
             if (!Mappings.Any(vm => ReferenceEquals(vm.Runtime, rt)))
-                Mappings.Add(new MappingViewModel(rt));
+            {
+                var vm = new MappingViewModel(rt);
+                vm.PropertyChanged += OnMappingSelectionChanged;
+                Mappings.Add(vm);
+            }
         HasMappings = Mappings.Count > 0;
+        SelectedCount = Mappings.Count(m => m.IsSelected);
     }
 
     // ---------- 顶部统计 ----------
@@ -144,7 +190,8 @@ public partial class MainViewModel : ObservableObject
         StatusSummary = RunningCount == 0
             ? (TotalCount == 0 ? "尚未创建映射" : "所有映射已停止")
             : $"{RunningCount}/{TotalCount} 条映射运行中";
-        RefreshedAtText = $"统计时间 {DateTime.Now:HH:mm:ss}";
+        StatusBadgeText = RunningCount > 0 ? "服务运行中" : StatusSummary;
+        RefreshedAtText = $"统计时间：{DateTime.Now:HH:mm:ss}";
     }
 
     // ---------- 命令 ----------
@@ -164,14 +211,31 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task StartAllAsync()
     {
-        await AppServices.Manager.StartAllAsync();
+        // 勾选了部分映射时只作用于所选（按钮文案会同步变为"启动所选"）
+        if (SelectedCount > 0 && SelectedCount < Mappings.Count)
+        {
+            foreach (var m in Mappings.Where(m => m.IsSelected))
+                await AppServices.Manager.StartMappingAsync(m.Runtime);
+        }
+        else
+        {
+            await AppServices.Manager.StartAllAsync();
+        }
         AppServices.SaveSettingsSafe();
     }
 
     [RelayCommand]
     private async Task StopAllAsync()
     {
-        await AppServices.Manager.StopAllAsync();
+        if (SelectedCount > 0 && SelectedCount < Mappings.Count)
+        {
+            foreach (var m in Mappings.Where(m => m.IsSelected))
+                await m.Runtime.StopAsync();
+        }
+        else
+        {
+            await AppServices.Manager.StopAllAsync();
+        }
         AppServices.SaveSettingsSafe();
     }
 
@@ -179,15 +243,8 @@ public partial class MainViewModel : ObservableObject
     private void RefreshPorts()
     {
         PortNames.ReplaceAll(SerialPortInfo.GetPortNames());
-        LocalIpSummary = BuildLocalIpSummary();
+        RefreshLocalIps();
         RefreshedAtText = $"串口列表已刷新 {DateTime.Now:HH:mm:ss}";
-    }
-
-    [RelayCommand]
-    private void OpenSettings()
-    {
-        var owner = System.Windows.Application.Current.Windows.OfType<Views.MainWindow>().FirstOrDefault();
-        new Views.SettingsWindow(owner) { Owner = owner }.ShowDialog();
     }
 
     [RelayCommand]

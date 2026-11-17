@@ -59,6 +59,53 @@ public class StringToBrushConverter : IValueConverter
         => throw new NotSupportedException();
 }
 
+/// <summary>行操作等级 ≥ 阈值 → Visible（窄窗口渐进显示行内图标按钮）。</summary>
+public class IntAtLeastToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is int level && int.TryParse(parameter?.ToString(), out var min) && level >= min
+            ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>行操作等级 &lt; 阈值 → Visible（还有隐藏操作时显示"···"菜单按钮）。</summary>
+public class IntBelowToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is int level && int.TryParse(parameter?.ToString(), out var max) && level < max
+            ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// 行操作显现等级 → 操作列固定宽度。表头与数据行绑定同一数值，
+/// 保证两处 Grid 的星号列分配一致（列头与行内容纵向对齐）。
+/// 各档宽度 = 该级按钮实测宽度 + 6px 余量。
+/// </summary>
+public class RowActionsLevelToWidthConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => new GridLength(value is int level
+            ? level switch
+            {
+                // 常驻组（客户端55+终端62+启停36+···41）+ 各级图标41 + 5px 间距
+                5 => 350.0,
+                4 => 350.0,
+                3 => 350.0,
+                2 => 304.0,
+                1 => 258.0,
+                _ => 212.0,
+            }
+            : 212.0);
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
 /// <summary>true → Visible。</summary>
 public class BoolToVisibilityConverter : IValueConverter
 {

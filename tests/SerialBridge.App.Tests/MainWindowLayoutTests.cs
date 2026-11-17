@@ -20,7 +20,8 @@ public sealed class MainWindowLayoutTests
             .Where(e => e.Name.LocalName == "Button").ToArray();
         Assert.Single(buttons.Where(e => (string?)e.Attribute("Click") == "OnOpenRemoteConnections"));
         Assert.Single(buttons.Where(e => (string?)e.Attribute("Click") == "OnOpenSettings"));
-        Assert.Single(buttons.Where(e => (string?)e.Attribute("Click") == "OnOpenAbout"));
+        // “关于”不再作为侧边导航入口，仅保留右上角帮助菜单中的入口。
+        Assert.DoesNotContain(buttons, e => (string?)e.Attribute("Click") == "OnOpenAbout");
         Assert.DoesNotContain(buttons, e => (string?)e.Attribute("Click") == "OnOpenLinuxAccess");
         Assert.DoesNotContain(document.Descendants(), e =>
             (string?)e.Attribute("Text") == "Linux 访问");
@@ -48,7 +49,7 @@ public sealed class MainWindowLayoutTests
     }
 
     [Fact]
-    public void MappingHeaderAndRows_ShareScrollViewport_WhenManyMappingsOverflow()
+    public void MappingHeaderAndRows_ShareScrollViewport_WithoutHorizontalScroll()
     {
         var document = Markup();
         var mappingItems = document.Descendants().Single(e =>
@@ -62,13 +63,23 @@ public sealed class MainWindowLayoutTests
         // a vertical scrollbar cannot shrink only the mapping rows.
         var tableScroll = Assert.Single(scrollViewers);
         Assert.Equal("Auto", (string?)tableScroll.Attribute("VerticalScrollBarVisibility"));
-        Assert.Equal("Auto", (string?)tableScroll.Attribute("HorizontalScrollBarVisibility"));
+        // 横向不允许拖动：列随宽度自适应收缩，操作按钮通过显现等级收纳/展开。
+        Assert.Equal("Disabled", (string?)tableScroll.Attribute("HorizontalScrollBarVisibility"));
 
         var tableGrid = tableScroll.Elements().Single(e => e.Name.LocalName == "Grid");
         var header = tableGrid.Elements().Single(e =>
             e.Name.LocalName == "Border" && (string?)e.Attribute("Grid.Row") == "0");
         Assert.Contains(header.Descendants(), e => (string?)e.Attribute("Text") == "映射名称");
         Assert.Equal("1", (string?)mappingItems.Parent?.Attribute("Grid.Row"));
+
+        // 行操作区包含 5 个渐进显现的快捷图标与"···"收纳菜单
+        var rowTemplate = document.Descendants().Single(e =>
+            e.Name.LocalName == "DataTemplate" &&
+            (string?)e.Attribute(Xaml + "Key") == "MappingCardTemplate");
+        foreach (var symbol in new[] { "PeopleTeam24", "ArrowSwap24", "Folder24", "EditSettings24", "DeleteDismiss24" })
+            Assert.Contains(rowTemplate.Descendants(), e => (string?)e.Attribute("Symbol") == symbol);
+        Assert.Contains(rowTemplate.Descendants(), e =>
+            ((string?)e.Attribute("Visibility"))?.Contains("IntBelowToVisibility") == true);
     }
 
     [Fact]

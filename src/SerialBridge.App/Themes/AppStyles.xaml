@@ -9,6 +9,9 @@
     <SolidColorBrush x:Key="GrayBrush" Color="#8A8A8A" />
     <SolidColorBrush x:Key="AccentBrush" Color="#2563EB" />
 
+    <!-- 弹层专用不透明底色：默认浅色值，ApplyTheme 会按主题替换 -->
+    <SolidColorBrush x:Key="PopupSurfaceBrush" Color="#FFFFFF" />
+
     <!-- 仪表盘统计卡片 -->
     <Style x:Key="StatCardStyle" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
