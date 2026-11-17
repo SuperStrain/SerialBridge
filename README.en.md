@@ -113,7 +113,7 @@ Visit [**GitHub Releases**](https://github.com/SuperStrain/SerialBridge/releases
 ### Requirements
 
 - **Windows 10 1809 or newer / Windows 11, x64** (the targeted platform; compatibility with older Windows installations should be verified on real machines)
-- An available COM port; USB-to-serial adapters may require their vendor-supplied drivers
+- **Serving a local COM mapping** requires a physical COM port and possibly a USB-to-serial vendor driver. **Using only the outgoing TCP client does not require a local COM port.**
 - Self-contained deployment: **no separate .NET Runtime installation required**
 - The embedded terminal uses **Microsoft Edge WebView2 Runtime**; install [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) if it is missing
 
