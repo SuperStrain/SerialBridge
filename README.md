@@ -3,9 +3,9 @@
 
   # SerialBridge
 
-  **让物理串口成为局域网里随时可访问的远程终端。**
+  **让 AI Agent 直接操作真实硬件的串口。**
 
-  让串口拥有类似 SSH / Telnet 远程终端的跨电脑访问体验：将物理 COM 口共享为 TCP 服务，也能作为客户端自动发现并连接其他 SerialBridge。无需在电脑之间切换，就能调试开发板、MCU 和嵌入式 Linux 设备。
+  将 Windows 物理 COM 口共享为局域网 TCP 服务，让 AI Agent 读取设备日志、发送诊断命令并分析反馈；也支持开发者远程连接其他 SerialBridge，直接操作嵌入式 Linux、MCU 等设备。
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
@@ -20,11 +20,52 @@
 
 ---
 
+## ⚡ 快速开始：让 AI Agent 操作真实串口
+
+**目标：** 一台 Windows 电脑连接嵌入式 Linux 开发板的物理串口；同一可信局域网中的 AI Agent 无需接触开发板，就能读取串口输出、执行诊断命令并分析结果。
+
+### 1. Windows 端：把串口共享到局域网
+
+从 [GitHub Releases](https://github.com/SuperStrain/SerialBridge/releases/latest) 安装或解压 SerialBridge，将开发板通过 USB 转串口连接到 Windows。
+
+在左侧 **串口映射** 页面点击 **新增映射**，选择实际 COM 口（如 `COM3`），按开发板要求设置波特率（如 `115200 8N1`），将 TCP 监听端口设为 `9001`，选择可被局域网访问的监听地址，保存并启动映射。
+
+> `0.0.0.0` 只表示监听所有本机 IPv4 网卡，**不是 Agent 的连接地址**。从界面“本机 IPv4”查看可达的 Windows IP，并检查入站防火墙。
+
+### 2. Agent 端：接入串口工具
+
+在运行 AI Agent 的 Linux 电脑上获取本仓库，并让 Agent 使用随仓库提供的 [serial-tcp-uart Skill](skills/serial-tcp-uart/SKILL.md) 和 [Python 脚本](skills/serial-tcp-uart/scripts/serial_session.py) 连接 `192.168.1.100:9001`（示例地址，替换为 Windows 主机实际 IP）。脚本仅依赖 Python 3 标准库。
+
+Agent 需要能访问这些本地文件并获得执行工具的权限；**仅安装 SerialBridge 不会自动让 AI Agent 具备串口操作能力**。
+
+### 3. 让 Agent 读取日志并执行诊断命令
+
+可以向已配置上述 Skill / 工具的 Agent 提出这样的任务：
+
+> 通过 SerialBridge 连接 `192.168.1.100:9001`，读取开发板串口输出，查询 Linux 版本和内存信息，根据返回结果分析系统状态。只执行只读诊断，不要修改设备配置。
+
+或者在 Agent 所在电脑的仓库根目录下，先用脚本验证链路（**这是工具调用示例，不等同于 AI 自主分析**）：
+
+```bash
+python3 skills/serial-tcp-uart/scripts/serial_session.py \
+  --host 192.168.1.100 --port 9001 exec "uname -a"
+```
+
+命令能否执行取决于设备是否已登录 Shell、串口权限及提示符匹配情况；必要时按 [Skill 说明](skills/serial-tcp-uart/SKILL.md) 配置登录和 `--prompt`。完成后应断开会话，避免长期占用单客户端串口映射。
+
+### 🎬 实际演示：AI Agent 通过串口操作开发板
+
+下方视频演示 AI Agent 在局域网中通过 SerialBridge 发送命令，并读取真实设备的串口返回信息。
+
+https://github.com/user-attachments/assets/e6fa1c20-761f-4ae9-a3da-4ff2781e7a71
+
+> **安全边界：** SerialBridge 负责原始 TCP ↔ 串口字节透传，**不内置 AI 模型、SSH/Telnet 认证或加密**。重启、刷写固件等会改变设备状态的操作需事先获得明确授权。更多人工交互方式、快捷命令和排障见 [用户使用指南](docs/用户使用说明.md)。
+
 ## ✨ 为什么选择 SerialBridge？
 
 **让串口不再局限于插着 USB 转串口线的那台电脑。** SerialBridge 将串口网络化，使远端的开发者和 AI Agent 也能像使用 SSH / Telnet 远程终端一样，打开设备控制台、输入命令并查看实时响应。**这里的“像”指使用体验，不表示采用 SSH、Telnet 或具有其认证、加密能力。**
 
-**项目的核心目标，是打通 AI Agent 与真实硬件之间的串口通道。** 将 USB 转串口设备连接到运行 SerialBridge 的 Windows 主机，同一局域网内的 AI Agent 即可通过 TCP 读取启动日志、发送调试命令、获取设备反馈，并根据结果继续分析或执行下一步操作。开发者不必在 AI 与串口终端之间反复复制粘贴，大幅减少设备调试、问题定位和回归验证的人工操作。
+**它把串口转化为 Agent 可以调用的网络入口。** Agent 通过现有工具链访问真实设备，开发者也可以随时用内置终端接管。无需在 AI 和串口终端之间反复复制日志、转发命令。
 
 SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供的是透明串口通道，而不是内置 AI 模型或无需授权的自动控制系统**。
 
@@ -78,30 +119,6 @@ SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供
 
 > **协议与网络边界：** 数据通道始终是**原始 TCP 字节透传**，不使用 SSH/Telnet 协议、虚拟 COM 驱动或远程控制 API。串口波特率等参数由电脑 B 设置。自动发现使用同一 IPv4 广播域中的 **UDP 39001**，可能受到 Windows 防火墙、网卡和 VLAN 的限制；扫描失败仍可手动连接。只列出远端正在监听、可供局域网访问的映射。网络中断后不会自动重发未完成的命令。
 
-## 🤖 用 AI Agent 调试真实设备
-
-### 🎬 演示视频
-
-观看 AI Agent 如何在同一局域网内通过 SerialBridge 向设备串口发送命令，并读取串口返回的日志。
-
-https://github.com/user-attachments/assets/e6fa1c20-761f-4ae9-a3da-4ff2781e7a71
-
-### 连接示例
-
-例如，AI Agent 在 Linux 开发机上运行，而开发板的 USB 串口连接在另一台 Windows 电脑上：
-
-1. 在 Windows 上启动 SerialBridge，将开发板的 `COM3` 映射到 TCP 端口 `9001`。
-2. 在同一可信局域网内，让 Agent 使用普通 TCP 客户端，或使用仓库提供的 [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) 与 [Python 脚本](skills/serial-tcp-uart/scripts/serial_session.py) 连接。
-3. Agent 可以读取日志、发送经授权的诊断命令、等待设备提示符，并结合返回结果辅助定位问题；人工仍可通过内置终端接管调试。
-
-```bash
-# 在 Agent 所在的 Linux 主机上，按实际主机 IP 修改地址
-python3 skills/serial-tcp-uart/scripts/serial_session.py \
-  --host 192.168.1.100 --port 9001 exec "uname -a"
-```
-
-> **边界说明：** SerialBridge 本身不推理、不执行 Agent 工作流；自动化逻辑由外部 Agent/脚本负责。串口是否需要登录、提示符如何匹配以及命令权限，都取决于目标设备和 Agent 配置。固件刷写、重启等改变设备状态的操作应先获得明确授权。
-
 ## 📥 安装
 
 前往 [**GitHub Releases**](https://github.com/SuperStrain/SerialBridge/releases/latest)，选择适合你的版本：
@@ -117,37 +134,6 @@ python3 skills/serial-tcp-uart/scripts/serial_session.py \
 - **本机串口服务端**需要可用的物理 COM 端口，USB 转串口适配器可能需要厂商驱动；**仅作为远程 TCP 客户端时不需要本机 COM 端口
 - 自包含发布，**无需另外安装 .NET Runtime**
 - 内置终端使用 Microsoft Edge **WebView2 Runtime**；缺失时需安装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
-
-## ⚡ 三步开始
-
-**示例：把本机 COM3 暴露为 TCP 9001。**
-
-1. 运行 SerialBridge，点击 **新增映射**，选择 `COM3`，设置波特率（例如 `115200 8N1`）。
-2. 将监听端口设为 `9001`；如需允许局域网设备接入，选择合适的监听网卡/IP，保存后点击 **启动**。
-3. 在另一台设备上，连接 SerialBridge 显示的 **Windows 主机局域网 IP + 9001**。
-
-```text
-Windows：COM3 @ 115200 8N1  ⇄  0.0.0.0:9001（监听）
-Linux：  连接 192.168.1.100:9001（示例地址）
-```
-
-`0.0.0.0` 是监听地址，**不是客户端应填写的目标地址**。请使用软件界面显示的实际主机 IP，并检查 Windows 防火墙设置。
-
-### 从 Linux 进行交互式调试
-
-推荐使用 `socat` 建立本地 PTY，再用 `picocom` 获得串口式逐键交互（包括 Tab、Ctrl+C 和方向键）：
-
-```bash
-sudo apt install socat picocom
-socat PTY,link=/tmp/ttydev,waitslave TCP:192.168.1.100:9001 &
-picocom /tmp/ttydev
-```
-
-结束后关闭 `picocom` 并清理对应 `socat` 进程。更完整的连接方式和排查说明见 [用户指南](docs/用户使用说明.md)。
-
-### 在终端中快捷发送命令
-
-打开对应映射的 **串口终端** → 点击 **快捷命令 / 宏** → **编辑**，创建例如 `uname -a` 的 Text 步骤，选择 `CR` 后保存。以后可直接点击终端底部按钮发送。多步骤宏可设置每步延时，运行时可取消**尚未发送**的步骤。
 
 ## 🏗️ 技术架构
 
