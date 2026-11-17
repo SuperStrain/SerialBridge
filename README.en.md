@@ -34,6 +34,15 @@
 
 On the agent's Linux machine, get this repository and make the included [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) and [Python script](skills/serial-tcp-uart/scripts/serial_session.py) available to the agent. Connect to `192.168.1.100:9001` (example address; replace it with the Windows host's real IP). The script uses only the Python 3 standard library.
 
+For example, clone the repository first (skip if you already have the source):
+
+```bash
+git clone https://github.com/SuperStrain/SerialBridge.git
+cd SerialBridge
+```
+
+How the agent loads the Skill depends on the agent platform; see the [Skill deployment notes](skills/serial-tcp-uart/SKILL.md).
+
 The agent must have access to these files and permission to execute tools. **Installing SerialBridge alone does not grant an agent serial-access capabilities.**
 
 ### 3. Ask the agent to inspect the device
