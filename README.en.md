@@ -3,9 +3,9 @@
 
   # SerialBridge
 
-  **Turn physical serial ports into network-accessible remote terminals.**
+  **Let AI agents interact with real hardware over serial.**
 
-  Give serial consoles an SSH/Telnet-like remote-terminal experience without changing their protocol: share local COM ports over raw TCP, or discover and connect to remote SerialBridge instances from the same application.
+  Expose a Windows PC's physical COM port over raw LAN TCP so an AI agent can read device logs, send diagnostic commands, and analyze responses. Developers can also connect to other SerialBridge instances for remote access to embedded Linux boards and MCUs.
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
@@ -20,11 +20,59 @@
 
 ---
 
+## ⚡ Quick start: let an AI agent operate a real serial console
+
+**Goal:** A Windows PC is connected to an embedded Linux board's physical serial port. An AI agent on another machine in the same trusted LAN can read serial output, send diagnostic commands, and analyze the responses without touching the board.
+
+### 1. On Windows: share the serial port
+
+[Download SerialBridge](https://github.com/SuperStrain/SerialBridge/releases/latest), connect the board to the Windows PC using a USB-to-serial adapter, and open **Mappings → Add Mapping**. Choose the actual COM port (for example, `COM3`), configure the device's serial settings (for example, `115200 8N1`), and listen on TCP port `9001` using a LAN-accessible address. Save and start the mapping.
+
+> `0.0.0.0` means “listen on all local IPv4 interfaces”; it is **not a destination IP**. Use the Windows PC's actual reachable IP shown in the app, and check the inbound firewall rules.
+
+### 2. On the agent machine: connect the serial tool
+
+On the agent's Linux machine, get this repository and make the included [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) and [Python script](skills/serial-tcp-uart/scripts/serial_session.py) available to the agent. Connect to `192.168.1.100:9001` (example address; replace it with the Windows host's real IP). The script uses only the Python 3 standard library.
+
+For example, clone the repository first (skip if you already have the source):
+
+```bash
+git clone https://github.com/SuperStrain/SerialBridge.git
+cd SerialBridge
+```
+
+How the agent loads the Skill depends on the agent platform; see the [Skill deployment notes](skills/serial-tcp-uart/SKILL.md).
+
+The agent must have access to these files and permission to execute tools. **Installing SerialBridge alone does not grant an agent serial-access capabilities.**
+
+### 3. Ask the agent to inspect the device
+
+For an agent configured with the Skill and execution tools, try this task:
+
+> Connect to `192.168.1.100:9001` through SerialBridge. Read the board's serial output, check the Linux version and memory information, and analyze the results. Run read-only diagnostics only; do not change the device configuration.
+
+To test the underlying connection first, run the included script from the repository root on the agent machine (**this is a tool invocation, not AI analysis on its own**):
+
+```bash
+python3 skills/serial-tcp-uart/scripts/serial_session.py \
+  --host 192.168.1.100 --port 9001 exec "uname -a"
+```
+
+Executing commands requires a usable device Shell, any necessary login, and a matching prompt. See the [Skill instructions](skills/serial-tcp-uart/SKILL.md) for login and `--prompt` options. Disconnect when finished to free single-client mappings.
+
+### 🎬 Demo: an AI agent controlling a board via serial
+
+Watch an agent send commands through SerialBridge over the LAN and read responses from the real device.
+
+https://github.com/user-attachments/assets/e6fa1c20-761f-4ae9-a3da-4ff2781e7a71
+
+> **Scope & safety:** SerialBridge forwards raw TCP ↔ serial bytes; it does **not** include an AI model or SSH/Telnet authentication or encryption. Reboots, firmware flashes, and other state-changing actions require explicit authorization. See the [user guide](docs/用户使用说明.md) (Chinese) for manual terminal access, macros, and troubleshooting.
+
 ## ✨ Why SerialBridge?
 
 **Access a serial console from another computer as easily as opening a remote terminal.** SerialBridge provides an experience reminiscent of SSH or Telnet, but **does not implement either protocol and does not provide SSH-style encryption or authentication**.
 
-**The primary goal is to connect AI agents to real hardware over serial.** Plug your USB-to-serial adapter into a Windows computer running SerialBridge. AI agents on the same LAN can then connect over TCP to read boot logs, send diagnostic commands, collect device responses, and use those responses to guide further investigation. This reduces manual copy-and-paste between an AI assistant and a serial terminal, speeding up embedded debugging and regression testing.
+**It turns a serial port into a network endpoint agents can use.** Agents access the board through their own tools; developers can take over with the built-in terminal instead of copying logs and commands back and forth.
 
 Regular TCP clients and human-operated terminals work too. **SerialBridge is a transparent transport, not a built-in AI model or an autonomous device controller.**
 
@@ -77,30 +125,6 @@ On A, open **Remote connections → Saved connections**, enter B's IP/hostname a
 
 > Discovery uses **UDP port 39001** within the same IPv4 broadcast domain; host firewalls or network isolation may prevent scanning. Manual IP/port connections remain available even when discovery is disabled. **This is raw TCP serial transport, not an SSH/Telnet server.** The remote host controls COM parameters; commands are never replayed automatically after reconnect.
 
-## 🤖 Debug real hardware with AI agents
-
-### 🎬 Video demo
-
-See how an AI agent on the same LAN uses SerialBridge to send commands to a device over serial and read the logs it returns.
-
-https://github.com/user-attachments/assets/e6fa1c20-761f-4ae9-a3da-4ff2781e7a71
-
-### Connection example
-
-For example, your AI agent runs on a Linux workstation while the development board's USB serial adapter is attached to a separate Windows PC:
-
-1. On Windows, configure SerialBridge to map the board's `COM3` to TCP port `9001`.
-2. From the same trusted LAN, use a raw TCP client or the included [serial-tcp-uart Agent Skill](skills/serial-tcp-uart/SKILL.md) and [Python script](skills/serial-tcp-uart/scripts/serial_session.py).
-3. The agent can collect logs, send authorized diagnostic commands, wait for device prompts, and analyze responses. Developers can also use the built-in terminal for hands-on control.
-
-```bash
-# Run on the agent's Linux host; replace with your Windows host's LAN IP
-python3 skills/serial-tcp-uart/scripts/serial_session.py \
-  --host 192.168.1.100 --port 9001 exec "uname -a"
-```
-
-> **Scope:** SerialBridge does not run an AI model or agent workflow. Automation belongs to the external agent/script. Login handling, prompt matching, and privileges depend on the target device and agent setup. State-changing operations such as flashing firmware or rebooting a device should require explicit authorization.
-
 ## 📥 Install
 
 Visit [**GitHub Releases**](https://github.com/SuperStrain/SerialBridge/releases/latest) and download either:
@@ -116,37 +140,6 @@ Visit [**GitHub Releases**](https://github.com/SuperStrain/SerialBridge/releases
 - **Serving a local COM mapping** requires a physical COM port and possibly a USB-to-serial vendor driver. **Using only the outgoing TCP client does not require a local COM port.**
 - Self-contained deployment: **no separate .NET Runtime installation required**
 - The embedded terminal uses **Microsoft Edge WebView2 Runtime**; install [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) if it is missing
-
-## ⚡ Quick start
-
-**Example: expose your Windows machine's COM3 over TCP port 9001.**
-
-1. Open SerialBridge, select **Add Mapping**, choose `COM3`, and set the serial parameters (for example, `115200 8N1`).
-2. Set the TCP port to `9001`, select a suitable listening interface/address for LAN access, save, and **Start** the mapping.
-3. Connect from another device using the **Windows host's actual LAN IP** and port `9001`, as shown in the app.
-
-```text
-Windows: COM3 @ 115200 8N1  ⇄  0.0.0.0:9001 (listen)
-Linux:   connect to 192.168.1.100:9001 (example IP)
-```
-
-`0.0.0.0` means “listen on all interfaces”; it is **not** a destination IP. Use the real host address and check Windows Firewall rules.
-
-### Interactive access from Linux
-
-For terminal-like keystroke handling (Tab completion, Ctrl+C, arrows), use `socat` to create a local PTY and open it with `picocom`:
-
-```bash
-sudo apt install socat picocom
-socat PTY,link=/tmp/ttydev,waitslave TCP:192.168.1.100:9001 &
-picocom /tmp/ttydev
-```
-
-Close `picocom` and clean up the matching `socat` process afterward. See the [user guide](docs/用户使用说明.md) (Chinese) for additional connection options and troubleshooting.
-
-### One-click terminal commands
-
-Open the mapping's **Serial Terminal** → **Quick Commands / Macros** → **Edit**. Create a Text step such as `uname -a` with a `CR` ending, save it, and use the command bar button to send it again. Multi-step macros support per-step delays and cancellation of **unsent** steps.
 
 ## 🏗️ Architecture
 
