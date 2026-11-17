@@ -36,6 +36,15 @@
 
 在运行 AI Agent 的 Linux 电脑上获取本仓库，并让 Agent 使用随仓库提供的 [serial-tcp-uart Skill](skills/serial-tcp-uart/SKILL.md) 和 [Python 脚本](skills/serial-tcp-uart/scripts/serial_session.py) 连接 `192.168.1.100:9001`（示例地址，替换为 Windows 主机实际 IP）。脚本仅依赖 Python 3 标准库。
 
+例如先获取仓库（已下载源码可跳过）：
+
+```bash
+git clone https://github.com/SuperStrain/SerialBridge.git
+cd SerialBridge
+```
+
+具体如何让 Agent 加载 Skill，取决于所用 Agent 平台；可以参考 [Skill 部署说明](skills/serial-tcp-uart/SKILL.md#部署到-linux-主机)。
+
 Agent 需要能访问这些本地文件并获得执行工具的权限；**仅安装 SerialBridge 不会自动让 AI Agent 具备串口操作能力**。
 
 ### 3. 让 Agent 读取日志并执行诊断命令
@@ -131,7 +140,7 @@ SerialBridge 同样支持普通 TCP 客户端和人工调试工具；**它提供
 ### 系统要求
 
 - **Windows 10 1809 或更新版本 / Windows 11，x64**（项目目标平台；低版本 Windows 兼容性请以实际测试为准）
-- **本机串口服务端**需要可用的物理 COM 端口，USB 转串口适配器可能需要厂商驱动；**仅作为远程 TCP 客户端时不需要本机 COM 端口
+- **本机串口服务端**需要可用的物理 COM 端口，USB 转串口适配器可能需要厂商驱动；**仅作为远程 TCP 客户端时不需要本机 COM 端口**
 - 自包含发布，**无需另外安装 .NET Runtime**
 - 内置终端使用 Microsoft Edge **WebView2 Runtime**；缺失时需安装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
 
