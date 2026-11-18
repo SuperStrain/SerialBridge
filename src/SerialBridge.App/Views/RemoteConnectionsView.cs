@@ -231,7 +231,7 @@ public sealed class RemoteConnectionsView : UserControl
                 if (owner is null || !owner.IsLoaded) return;
                 _status.Text = "连接已断开。";
                 System.Windows.MessageBox.Show(owner,
-                    reason + "。\\n请检查服务端客户端连接数量及运行状态。",
+                    reason + "。" + Environment.NewLine + "请检查服务端客户端连接数量及运行状态。",
                     "远程连接已断开",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 RefreshSaved();
