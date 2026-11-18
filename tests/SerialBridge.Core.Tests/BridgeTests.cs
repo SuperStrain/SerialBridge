@@ -591,17 +591,17 @@ public sealed class MappingReservationTests
         {
             Name = "B", PortName = "com31", ListenIp = "127.0.0.1", ListenPort = 29002
         };
-        Assert.Contains("COM 串口", manager.ValidateNew(duplicateCom));
+        Assert.Contains("COM 串口", manager.ValidateForSave(duplicateCom));
         var overlappingEndpoint = new MappingConfig
         {
             Name = "C", PortName = "COM32", ListenIp = "127.0.0.1", ListenPort = 29001
         };
-        Assert.Contains("TCP 端口", manager.ValidateNew(overlappingEndpoint));
+        Assert.Contains("TCP 端口", manager.ValidateForSave(overlappingEndpoint));
         var independent = new MappingConfig
         {
             Name = "D", PortName = "COM33", ListenIp = "127.0.0.1", ListenPort = 29003
         };
-        Assert.Null(manager.ValidateNew(independent));
+        Assert.Null(manager.ValidateForSave(independent));
     }
 
     [Fact]
@@ -616,7 +616,28 @@ public sealed class MappingReservationTests
         {
             Name = "B", PortName = "COM42", ListenIp = "192.0.2.2", ListenPort = 29001
         };
-        Assert.Null(manager.ValidateNew(second));
+        Assert.Null(manager.ValidateForSave(second));
+        Assert.Null(manager.ValidateForSave(first.Config, first));
+    }
+
+    [Fact]
+    public async Task LegacyStoppedAlternateMappingsCanStillStart()
+    {
+        using var manager = new SerialBridge.Core.Management.MappingManager();
+        var first = manager.CreateMapping(new MappingConfig
+        {
+            Name = "备用一", PortName = "COM51", ListenIp = "127.0.0.1", ListenPort = 29011
+        });
+        var second = manager.CreateMapping(new MappingConfig
+        {
+            Name = "备用二", PortName = "COM51", ListenIp = "127.0.0.1", ListenPort = 29012
+        });
+        // Historic configuration may contain duplicate COM ports. Saving NEW
+        // mappings forbids them, but starting an alternate when both are
+        // stopped must not be blocked by a merely configured mapping.
         Assert.Null(manager.ValidateNew(first.Config, first));
+        Assert.Null(manager.ValidateNew(second.Config, second));
+        Assert.Contains("COM 串口", manager.ValidateForSave(first.Config, second));
+        await Task.CompletedTask;
     }
 }
