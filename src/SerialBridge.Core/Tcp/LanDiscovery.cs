@@ -167,14 +167,53 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
 public static class LanDiscoveryScanner
 {
     /// <summary>
+    /// Enumerate host addresses in an explicit CIDR. Limit to /24.. /32
+    /// (at most 254 hosts) to avoid accidental broad network sweeps.
+    /// </summary>
+    public static IReadOnlyList<IPAddress> ExpandCidr(string cidr)
+    {
+        var parts = cidr.Trim().Split('/');
+        if (parts.Length != 2 || !IPAddress.TryParse(parts[0], out var address) ||
+            address.AddressFamily != AddressFamily.InterNetwork ||
+            !int.TryParse(parts[1], out var prefix) || prefix is < 24 or > 32)
+            throw new ArgumentException("请输入有效 IPv4 网段（例如 192.168.2.0/24，范围 /24～/32）。");
+
+        var bytes = address.GetAddressBytes();
+        // Work in unsigned network-byte order; /24.. /32 always fits 256.
+        var raw = ((uint)bytes[0] << 24) | ((uint)bytes[1] << 16) |
+                  ((uint)bytes[2] << 8) | bytes[3];
+        var mask = prefix == 32 ? uint.MaxValue : uint.MaxValue << (32 - prefix);
+        var network = raw & mask;
+        var count = 1u << (32 - prefix);
+        var first = prefix == 32 ? 0u : 1u;
+        var end = prefix == 32 ? count : count - 1;
+        var result = new List<IPAddress>();
+        for (var offset = first; offset < end; offset++)
+        {
+            var value = network + offset;
+            var ip = new IPAddress(new[]
+            {
+                (byte)(value >> 24), (byte)(value >> 16),
+                (byte)(value >> 8), (byte)value
+            });
+            if (IPAddress.IsLoopback(ip) || ip.GetAddressBytes()[0] is >= 224 or 0)
+                throw new ArgumentException("不支持回环、组播或保留网段扫描。");
+            result.Add(ip);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Broadcast on local IPv4 interfaces. Optionally query a known host by
     /// unicast UDP when routers do not forward broadcasts across subnets.
     /// </summary>
     public static async Task<IReadOnlyList<DiscoveredDevice>> ScanAsync(
-        TimeSpan timeout, CancellationToken token = default, IPAddress? targetHost = null)
+        TimeSpan timeout, CancellationToken token = default, IPAddress? targetHost = null,
+        string? targetSubnet = null)
     {
         using var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         udp.EnableBroadcast = true;
+        udp.Client.ReceiveBufferSize = 1024 * 1024;
         var requestId = Guid.NewGuid().ToString("D");
         var packet = JsonSerializer.SerializeToUtf8Bytes(new DiscoveryPacket
         {
@@ -204,11 +243,22 @@ public static class LanDiscoveryScanner
                 throw new ArgumentException("目标 IP 必须是有效的远程 IPv4 单播地址。", nameof(targetHost));
             destinations.Add(targetHost);
         }
+        var subnetHosts = string.IsNullOrWhiteSpace(targetSubnet)
+            ? Array.Empty<IPAddress>()
+            : ExpandCidr(targetSubnet).ToArray();
+        foreach (var address in subnetHosts) destinations.Add(address);
+
+        // Rate-limit directed discovery so a /24 does not become a UDP burst.
+        // Local broadcast still happens once per active interface.
+        var sent = 0;
         foreach (var address in destinations)
         {
+            token.ThrowIfCancellationRequested();
             try { await udp.SendAsync(packet, new IPEndPoint(address, LanDiscoveryProtocol.Port), token)
                 .ConfigureAwait(false); }
             catch (SocketException) { } // One unavailable network interface is not fatal.
+            if (++sent % 16 == 0 && subnetHosts.Length != 0)
+                await Task.Delay(20, token).ConfigureAwait(false);
         }
         var found = new Dictionary<Guid, DiscoveredDevice>();
         using var window = CancellationTokenSource.CreateLinkedTokenSource(token);
