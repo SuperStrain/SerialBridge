@@ -5,7 +5,7 @@ using SerialBridge.Core.Models;
 
 namespace SerialBridge.Core.Tcp;
 
-/// <summary>Local-subnet discovery only; no remote configuration or control.</summary>
+/// <summary>UDP discovery: local broadcast plus optional routed unicast targets; no remote control.</summary>
 public static class LanDiscoveryProtocol
 {
     public const int Port = 39001;
@@ -166,9 +166,12 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
 
 public static class LanDiscoveryScanner
 {
-    /// <summary>Send broadcast per IPv4 interface; no port scans and no implicit TCP connections.</summary>
+    /// <summary>
+    /// Broadcast on local IPv4 interfaces. Optionally query a known host by
+    /// unicast UDP when routers do not forward broadcasts across subnets.
+    /// </summary>
     public static async Task<IReadOnlyList<DiscoveredDevice>> ScanAsync(
-        TimeSpan timeout, CancellationToken token = default)
+        TimeSpan timeout, CancellationToken token = default, IPAddress? targetHost = null)
     {
         using var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         udp.EnableBroadcast = true;
@@ -192,6 +195,14 @@ public static class LanDiscoveryScanner
                 destinations.Add(new IPAddress(Enumerable.Range(0, 4)
                     .Select(i => (byte)(ip[i] | ~m[i])).ToArray()));
             }
+        }
+        if (targetHost is not null)
+        {
+            if (targetHost.AddressFamily != AddressFamily.InterNetwork ||
+                IPAddress.IsLoopback(targetHost) ||
+                targetHost.Equals(IPAddress.Any) || targetHost.Equals(IPAddress.Broadcast))
+                throw new ArgumentException("目标 IP 必须是有效的远程 IPv4 单播地址。", nameof(targetHost));
+            destinations.Add(targetHost);
         }
         foreach (var address in destinations)
         {
