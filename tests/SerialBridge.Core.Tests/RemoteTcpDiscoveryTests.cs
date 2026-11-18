@@ -57,14 +57,19 @@ public sealed class RemoteTcpDiscoveryTests
         });
         try
         {
+            var lost = new TaskCompletionSource<string>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            remote.ConnectionLost += reason => lost.TrySetResult(reason);
             await remote.ConnectAsync();
             using var accepted = await listener.AcceptTcpClientAsync()
                 .WaitAsync(TimeSpan.FromSeconds(5));
             accepted.Client.Shutdown(SocketShutdown.Both);
-            Assert.True(SpinWait.SpinUntil(() => !remote.IsConnected,
-                TimeSpan.FromSeconds(5)));
+            // The event is raised only AFTER the disconnect reason is published.
+            var reason = await lost.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(remote.IsConnected);
             Assert.True(remote.WasQuickDisconnect);
-            Assert.Contains("可能已达服务端连接数上限", remote.LastDisconnectReason);
+            Assert.Contains("可能已达服务端连接数上限", reason);
+            Assert.Equal(reason, remote.LastDisconnectReason);
         }
         finally { listener.Stop(); }
     }
@@ -81,6 +86,9 @@ public sealed class RemoteTcpDiscoveryTests
         });
         try
         {
+            var lost = new TaskCompletionSource<string>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            remote.ConnectionLost += reason => lost.TrySetResult(reason);
             await remote.ConnectAsync();
             using var accepted = await listener.AcceptTcpClientAsync()
                 .WaitAsync(TimeSpan.FromSeconds(5));
@@ -88,8 +96,8 @@ public sealed class RemoteTcpDiscoveryTests
             Assert.True(SpinWait.SpinUntil(() => remote.ReceivedBytes >= 1,
                 TimeSpan.FromSeconds(5)));
             accepted.Client.Shutdown(SocketShutdown.Both);
-            Assert.True(SpinWait.SpinUntil(() => !remote.IsConnected,
-                TimeSpan.FromSeconds(5)));
+            await lost.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(remote.IsConnected);
             Assert.False(remote.WasQuickDisconnect);
         }
         finally { listener.Stop(); }
