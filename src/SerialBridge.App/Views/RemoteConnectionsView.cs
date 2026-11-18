@@ -19,7 +19,9 @@ public sealed class RemoteConnectionsView : UserControl
     // Reuse row controls across timer ticks so scrolling, keyboard focus and
     // in-progress button interactions are never destroyed by a status refresh.
     private readonly Dictionary<Guid, SavedConnectionRow> _savedRows = new();
-    private RemoteTcpSession? _lastConnectAttempt;
+    // Only a success notice from this session may be replaced by its later EOF.
+    // An unrelated connection completing later must retain its own status.
+    private RemoteTcpSession? _successNoticeSession;
 
     private sealed record SavedConnectionRow(
         Border Container, TextBlock Name, TextBlock Details, Button ConnectionButton);
@@ -157,11 +159,24 @@ public sealed class RemoteConnectionsView : UserControl
             if (!session.IsConnected && session.WasQuickDisconnect)
                 row.Details.Text += " · " + session.LastDisconnectReason;
         }
-        // A TCP handshake can report success just before the server closes
-        // an over-limit connection. Correct the success notice on the next tick.
-        if (_lastConnectAttempt is { IsConnected: false, WasQuickDisconnect: true } recent &&
+        // Correct only the notice produced by THIS session. Another connection
+        // may have completed later and written an unrelated success message.
+        if (_successNoticeSession is { IsConnected: false, WasQuickDisconnect: true } recent &&
             (_status.Text == "连接成功。" || _status.Text == "已连接并打开终端。"))
+        {
             _status.Text = recent.LastDisconnectReason;
+            _successNoticeSession = null;
+        }
+    }
+
+    private void ShowConnectResult(RemoteTcpSession session, string successMessage)
+    {
+        _successNoticeSession = session.IsConnected ? session : null;
+        _status.Text = session.IsConnected
+            ? successMessage
+            : session.WasQuickDisconnect
+                ? session.LastDisconnectReason
+                : "连接已断开。";
     }
 
     private SavedConnectionRow CreateSavedRow(SerialBridge.Core.Tcp.RemoteTcpSession session)
@@ -186,12 +201,8 @@ public sealed class RemoteConnectionsView : UserControl
             try
             {
                 if (session.IsConnected) await AppServices.Remotes.DisconnectAsync(session);
-                else
-                {
-                    _lastConnectAttempt = session;
-                    await AppServices.Remotes.ConnectAsync(session);
-                }
-                _status.Text = session.IsConnected ? "连接成功。" : "连接已断开。";
+                else await AppServices.Remotes.ConnectAsync(session);
+                ShowConnectResult(session, "连接成功。");
             }
             catch (Exception ex) { _status.Text = "连接失败：" + ex.Message; }
             RefreshSaved();
@@ -268,10 +279,9 @@ public sealed class RemoteConnectionsView : UserControl
                         }
                         try
                         {
-                            _lastConnectAttempt = existing;
                             await AppServices.Remotes.ConnectAsync(existing);
                             if (existing.IsConnected) TerminalWindow.OpenFor(existing);
-                            _status.Text = "已连接并打开终端。";
+                            ShowConnectResult(existing, "已连接并打开终端。");
                         }
                         catch (Exception ex) { _status.Text = "连接失败：" + ex.Message; }
                         RefreshSaved();
