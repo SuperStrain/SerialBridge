@@ -97,6 +97,7 @@ public sealed class RemoteTcpSession : IAsyncDisposable
         CancellationToken token, int generation, long connectedAt)
     {
         var peerClosedWithoutData = false;
+        var receivedAny = false;
         var reason = "远程连接已断开";
         try
         {
@@ -113,6 +114,7 @@ public sealed class RemoteTcpSession : IAsyncDisposable
                         peerClosedWithoutData = true;
                         break;
                     }
+                    receivedAny = true;
                     Interlocked.Add(ref _received, n);
                     // Subscribers are UI consumers and must not kill the TCP loop.
                     try { DataReceived?.Invoke(buffer.AsSpan(0, n).ToArray()); }
@@ -150,7 +152,7 @@ public sealed class RemoteTcpSession : IAsyncDisposable
                 var elapsed = Stopwatch.GetElapsedTime(connectedAt);
                 _quickDisconnect = peerClosedWithoutData &&
                     elapsed < TimeSpan.FromSeconds(1) &&
-                    Interlocked.Read(ref _received) == 0;
+                    !receivedAny;
                 if (_quickDisconnect)
                     reason = "连接后立即断开，可能已达服务端连接数上限";
                 _connected = false;
