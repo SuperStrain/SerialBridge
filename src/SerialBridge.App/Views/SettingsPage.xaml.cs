@@ -54,11 +54,13 @@ public partial class SettingsPage : UserControl
 public partial class SettingsViewModel : CommunityToolkit.Mvvm.ComponentModel.ObservableObject
 {
     private readonly SerialBridge.Core.Models.GeneralSettings _general;
+    private bool _synchronizingTheme;
 
     public SettingsViewModel()
     {
         _general = AppServices.Settings.General;
         _themeIndex = _general.Theme switch { "Dark" => 1, "Auto" => 2, _ => 0 };
+        App.ThemeChanged += SynchronizeTheme;
         _restoreMappingsOnStartup = _general.RestoreMappingsOnStartup;
         _allowLanDiscovery = _general.AllowLanDiscovery;
     }
@@ -118,8 +120,18 @@ public partial class SettingsViewModel : CommunityToolkit.Mvvm.ComponentModel.Ob
         };
     }
 
+    private void SynchronizeTheme(string theme)
+    {
+        var index = theme switch { "Dark" => 1, "Auto" => 2, _ => 0 };
+        if (ThemeIndex == index) return;
+        _synchronizingTheme = true;
+        try { ThemeIndex = index; }
+        finally { _synchronizingTheme = false; }
+    }
+
     partial void OnThemeIndexChanged(int value)
     {
+        if (_synchronizingTheme) return;
         var theme = value switch { 1 => "Dark", 2 => "Auto", _ => "Light" };
         if (_general.Theme != theme)
         {
