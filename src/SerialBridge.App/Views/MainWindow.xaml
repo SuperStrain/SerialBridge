@@ -7,7 +7,6 @@
     xmlns:views="clr-namespace:SerialBridge.App.Views"
     xmlns:conv="clr-namespace:SerialBridge.App.Converters"
     xmlns:tb="clr-namespace:H.NotifyIcon;assembly=H.NotifyIcon.Wpf"
-    xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
     Title="SerialBridge — 串口网络桥接工具"
     Width="1180" Height="820"
     MinWidth="1080" MinHeight="640"
@@ -191,18 +190,20 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <Grid Grid.Row="0">
-            <ui:TitleBar Title="" Padding="8,0" />
-            <!-- 升级入口移到窗口左上角：有新版本时显示，点击打开升级弹窗。 -->
-            <Border x:Name="UpdateBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
-                    Margin="12,0,0,0" Background="#1A16A34A" CornerRadius="4" Padding="7,2"
-                    Cursor="Hand" MouseLeftButtonDown="OnUpdateBadgeClick"
-                    shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                    ToolTip="{Binding UpdateBadgeVersion}"
-                    Visibility="{Binding UpdateBadgeVisible, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="NEW" FontSize="11" FontWeight="Bold" Foreground="#16A34A" />
-            </Border>
-        </Grid>
+        <!-- TitleBar intercepts WM_NCHITTEST in WPF-UI 4.3.0. Clickable
+             content MUST be placed in Header/CenterContent/TrailingContent;
+             overlaying a sibling Border causes clicks to become HTCAPTION. -->
+        <ui:TitleBar Grid.Row="0" Title="" Padding="8,0">
+            <ui:TitleBar.Header>
+                <Border x:Name="UpdateBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
+                        Margin="4,0,0,0" Background="#1A16A34A" CornerRadius="4" Padding="7,2"
+                        Cursor="Hand" MouseLeftButtonDown="OnUpdateBadgeClick"
+                        ToolTip="{Binding UpdateBadgeVersion}"
+                        Visibility="{Binding UpdateBadgeVisible, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="NEW" FontSize="11" FontWeight="Bold" Foreground="#16A34A" />
+                </Border>
+            </ui:TitleBar.Header>
+        </ui:TitleBar>
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="205" />
