@@ -79,9 +79,9 @@ public partial class MappingEditWindow : FluentWindow
         {
             try
             {
-                using var listener = new TcpListener(IPAddress.Parse(config.ListenIp), config.ListenPort);
-                listener.Start();
-                listener.Stop();
+                var listener = new TcpListener(IPAddress.Parse(config.ListenIp), config.ListenPort);
+                try { listener.Start(); }
+                finally { listener.Stop(); }
             }
             catch (SocketException ex) when (ex.SocketErrorCode is
                 SocketError.AddressAlreadyInUse or SocketError.AccessDenied)
