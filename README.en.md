@@ -7,7 +7,7 @@
 
   AI agents can already access local serial ports. But how do they access a device connected to a different computer?
 
-SerialBridge exposes a Windows PC's physical serial port as a raw TCP service on the LAN. An AI agent running on another computer can read logs, send diagnostic commands, and analyze device responses without a direct hardware connection. SerialBridge can also connect to other instances through its built-in remote client.
+  SerialBridge exposes a Windows PC's physical serial port as a raw TCP service on the LAN. An AI agent running on another computer can read logs, send diagnostic commands, and analyze device responses without a direct hardware connection. SerialBridge can also connect to other instances through its built-in remote client.
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
