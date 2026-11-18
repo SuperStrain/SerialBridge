@@ -29,11 +29,16 @@ public sealed class MainWindowUpdateBadgeTests
         var badge = NamedElement(document, "UpdateBadge");
 
         Assert.Equal("OnUpdateBadgeClick", (string?)badge.Attribute("MouseLeftButtonDown"));
-        // FluentWindow uses WindowChrome for titlebar drag; the badge must
-        // explicitly opt into mouse hit testing within that chrome.
-        var chrome = XNamespace.Get("clr-namespace:System.Windows.Shell;assembly=PresentationFramework");
-        Assert.Equal("True",
-            (string?)badge.Attribute(chrome + "WindowChrome.IsHitTestVisibleInChrome"));
+        // WPF-UI 4.3.0 performs its own WM_NCHITTEST handling. Only
+        // TitleBar.Header/CenterContent/TrailingContent count as interactive
+        // regions; a sibling badge or WindowChrome attached property does not.
+        var ui = XNamespace.Get("http://schemas.lepo.co/wpfui/2022/xaml");
+        Assert.Equal(ui + "TitleBar.Header", badge.Parent?.Name);
+        Assert.Equal(ui + "TitleBar", badge.Parent?.Parent?.Name);
+        Assert.DoesNotContain(document.Descendants(),
+            element => element.Name.LocalName == "Grid" &&
+                       element.Elements().Any(child => child.Name == ui + "TitleBar") &&
+                       element.Elements().Any(child => child == badge));
         Assert.Equal("#1A16A34A", (string?)badge.Attribute("Background"));
         Assert.Contains("UpdateBadgeVisible", (string?)badge.Attribute("Visibility"));
         Assert.Contains("UpdateBadgeVersion", (string?)badge.Attribute("ToolTip"));
