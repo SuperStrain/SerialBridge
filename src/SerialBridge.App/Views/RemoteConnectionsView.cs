@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using SerialBridge.App.Services;
+using SerialBridge.Core.Net;
 using SerialBridge.Core.Models;
 using SerialBridge.Core.Tcp;
 
@@ -22,8 +23,7 @@ public sealed class RemoteConnectionsView : UserControl
     private readonly TextBox _discoveryTarget = new()
     {
         MinWidth = 180, MaxWidth = 230,
-        Text = "192.168.2.0/24",
-        ToolTip = "输入目标 IPv4 网段，如 192.168.2.0/24（最多扫描 254 个地址）",
+        ToolTip = "默认跟随本机 IPv4 网段，可修改第三段扫描其他子网（/24～/32）",
         IsEnabled = false
     };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
@@ -32,15 +32,14 @@ public sealed class RemoteConnectionsView : UserControl
     // Reuse row controls across timer ticks so scrolling, keyboard focus and
     // in-progress button interactions are never destroyed by a status refresh.
     private readonly Dictionary<Guid, SavedConnectionRow> _savedRows = new();
-    // Only a success notice from this session may be replaced by its later EOF.
-    // An unrelated connection completing later must retain its own status.
-    private RemoteTcpSession? _successNoticeSession;
+    private readonly Dictionary<RemoteTcpSession, Action<string>> _pendingDisconnectWarnings = new();
 
     private sealed record SavedConnectionRow(
         Border Container, TextBlock Name, TextBlock Details, Button ConnectionButton);
 
     public RemoteConnectionsView()
     {
+        _discoveryTarget.Text = NetworkInfo.GetDefaultDiscoverySubnet() ?? "";
         var root = new DockPanel();
         Content = root;
 
@@ -109,7 +108,22 @@ public sealed class RemoteConnectionsView : UserControl
     }
 
     /// <summary>宿主窗口真正关闭时停止状态刷新计时器。</summary>
-    public void StopRefresh() => _refresh.Stop();
+    public void StopRefresh()
+    {
+        _refresh.Stop();
+        foreach (var (session, callback) in _pendingDisconnectWarnings)
+            session.ConnectionLost -= callback;
+        _pendingDisconnectWarnings.Clear();
+    }
+
+    private void ClearDisconnectWarning(RemoteTcpSession session, Action<string>? expected = null)
+    {
+        // A superseded attempt must not remove the newer attempt's handler.
+        if (!_pendingDisconnectWarnings.TryGetValue(session, out var callback) ||
+            (expected is not null && !ReferenceEquals(expected, callback))) return;
+        _pendingDisconnectWarnings.Remove(session);
+        session.ConnectionLost -= callback;
+    }
 
     private static Button Action(string label, Action handler)
     {
@@ -187,27 +201,56 @@ public sealed class RemoteConnectionsView : UserControl
                 $"{(session.IsConnected ? "已连接" : "未连接")} · " +
                 $"发送 {session.SentBytes:N0} B / 接收 {session.ReceivedBytes:N0} B";
             row.ConnectionButton.Content = session.IsConnected ? "断开" : "连接";
-            if (!session.IsConnected && session.WasQuickDisconnect)
-                row.Details.Text += " · " + session.LastDisconnectReason;
-        }
-        // Correct only the notice produced by THIS session. Another connection
-        // may have completed later and written an unrelated success message.
-        if (_successNoticeSession is { IsConnected: false, WasQuickDisconnect: true } recent &&
-            (_status.Text == "连接成功。" || _status.Text == "已连接并打开终端。"))
-        {
-            _status.Text = recent.LastDisconnectReason;
-            _successNoticeSession = null;
         }
     }
 
-    private void ShowConnectResult(RemoteTcpSession session, string successMessage)
+    /// <summary>
+    /// One popup per manually initiated TCP connection. Subscribe before
+    /// connecting so an immediate EOF cannot race ahead of the handler.
+    /// Auto-reconnects are intentionally not hooked: no popup storms.
+    /// </summary>
+    private async Task ConnectWithNoticeAsync(RemoteTcpSession session, string successMessage)
     {
-        _successNoticeSession = session.IsConnected ? session : null;
-        _status.Text = session.IsConnected
-            ? successMessage
-            : session.WasQuickDisconnect
-                ? session.LastDisconnectReason
-                : "连接已断开。";
+        ClearDisconnectWarning(session);
+        Action<string>? lost = null;
+        lost = reason =>
+        {
+            // Snapshot this connection's classification before auto-reconnect
+            // can reset WasQuickDisconnect for the next generation.
+            var wasQuickDisconnect = session.WasQuickDisconnect;
+            session.ConnectionLost -= lost;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                // The view can outlive a navigation change, but not its window.
+                if (_pendingDisconnectWarnings.TryGetValue(session, out var current) &&
+                    ReferenceEquals(current, lost))
+                    _pendingDisconnectWarnings.Remove(session);
+                else return;
+                if (!wasQuickDisconnect) return;
+                var owner = Window.GetWindow(this);
+                if (owner is null || !owner.IsLoaded) return;
+                _status.Text = "连接已断开。";
+                System.Windows.MessageBox.Show(owner,
+                    reason + "。\\n请检查服务端客户端连接数量及运行状态。",
+                    "远程连接已断开",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                RefreshSaved();
+            }));
+        };
+        _pendingDisconnectWarnings[session] = lost;
+        session.ConnectionLost += lost;
+        try
+        {
+            await AppServices.Remotes.ConnectAsync(session);
+            // If the peer already closed, the event handler will display the
+            // warning. Do not replace it with a late 'success' notice.
+            _status.Text = session.IsConnected ? successMessage : "连接已断开。";
+        }
+        catch
+        {
+            ClearDisconnectWarning(session, lost);
+            throw;
+        }
     }
 
     private SavedConnectionRow CreateSavedRow(SerialBridge.Core.Tcp.RemoteTcpSession session)
@@ -231,9 +274,13 @@ public sealed class RemoteConnectionsView : UserControl
         {
             try
             {
-                if (session.IsConnected) await AppServices.Remotes.DisconnectAsync(session);
-                else await AppServices.Remotes.ConnectAsync(session);
-                ShowConnectResult(session, "连接成功。");
+                if (session.IsConnected)
+                {
+                    ClearDisconnectWarning(session);
+                    await AppServices.Remotes.DisconnectAsync(session);
+                }
+                else await ConnectWithNoticeAsync(session, "连接成功。");
+                if (!session.IsConnected) _status.Text = "连接已断开。";
             }
             catch (Exception ex) { _status.Text = "连接失败：" + ex.Message; }
             RefreshSaved();
@@ -253,6 +300,7 @@ public sealed class RemoteConnectionsView : UserControl
         {
             try
             {
+                ClearDisconnectWarning(session);
                 await AppServices.Remotes.RemoveAsync(session);
                 AppServices.SaveSettingsSafe();
                 _status.Text = "连接配置已删除。";
@@ -323,9 +371,8 @@ public sealed class RemoteConnectionsView : UserControl
                         }
                         try
                         {
-                            await AppServices.Remotes.ConnectAsync(existing);
+                            await ConnectWithNoticeAsync(existing, "已连接并打开终端。");
                             if (existing.IsConnected) TerminalWindow.OpenFor(existing);
-                            ShowConnectResult(existing, "已连接并打开终端。");
                         }
                         catch (Exception ex) { _status.Text = "连接失败：" + ex.Message; }
                         RefreshSaved();
