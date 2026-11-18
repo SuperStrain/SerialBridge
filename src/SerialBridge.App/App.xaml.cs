@@ -63,16 +63,21 @@ public partial class App : Application
         Shutdown();
     }
 
+    /// <summary>Raised after every theme application so all theme selectors stay in sync.</summary>
+    public static event Action<string>? ThemeChanged;
+
+    public static ApplicationTheme GetEffectiveTheme(string theme) => theme switch
+    {
+        "Dark" => ApplicationTheme.Dark,
+        "Auto" => ApplicationThemeManager.GetSystemTheme().ToString().Contains("Dark")
+            ? ApplicationTheme.Dark
+            : ApplicationTheme.Light,
+        _ => ApplicationTheme.Light,
+    };
+
     public static void ApplyTheme(string theme)
     {
-        var mode = theme switch
-        {
-            "Dark" => ApplicationTheme.Dark,
-            "Auto" => ApplicationThemeManager.GetSystemTheme().ToString().Contains("Dark")
-                ? ApplicationTheme.Dark
-                : ApplicationTheme.Light,
-            _ => ApplicationTheme.Light,
-        };
+        var mode = GetEffectiveTheme(theme);
         ApplicationThemeManager.Apply(mode);
 
         // WPF-UI 的填充刷子带透明度，弹层需要完全不透明的底色才可读；
@@ -81,5 +86,24 @@ public partial class App : Application
             ? System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20)
             : System.Windows.Media.Color.FromRgb(0xFF, 0xFF, 0xFF);
         Current.Resources["PopupSurfaceBrush"] = new System.Windows.Media.SolidColorBrush(surface);
+
+        // WPF-UI writes a local Window.Background when switching themes.
+        // Reattach the original dynamic resource *after* its theme update, or
+        // the title strip can remain black after switching Dark -> Light.
+        // Centralize this for both the toolbar button and Settings selector.
+        foreach (Window window in Current.Windows)
+        {
+            window.Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ContextIdle,
+                new Action(() =>
+                {
+                    if (!window.IsLoaded) return;
+                    window.ClearValue(Window.BackgroundProperty);
+                    window.SetResourceReference(Window.BackgroundProperty,
+                        "ApplicationBackgroundBrush");
+                }));
+        }
+
+        ThemeChanged?.Invoke(theme);
     }
 }
