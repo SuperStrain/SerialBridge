@@ -309,6 +309,9 @@ public sealed class TcpServerService : IAsyncDisposable
                 if (_clients.Count >= max)
                 {
                     LogX.Warn($"拒绝来自 {remote} 的新连接：已达客户端上限（{max}）。");
+                    // TCP handshake completed, but admission was denied. Persist as
+                    // a completed, zero-byte rejection rather than a live session.
+                    _history?.RecordRejected(_config.Id, remote, DateTime.UtcNow, "已达客户端上限");
                     ClientRejected?.Invoke(remote,
                         _config.ClientMode == ClientMode.Single ? "单客户端模式下已有客户端接入" : $"已达到最大客户端数量（{max}）");
                     try { tcp.Close(); } catch { }
