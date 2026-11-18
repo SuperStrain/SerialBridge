@@ -31,12 +31,15 @@ public sealed class MappingManager : IDisposable
         {
             foreach (var m in _mappings)
             {
-                if (ReferenceEquals(m, self) || !m.IsRunning) continue;
+                if (ReferenceEquals(m, self)) continue;
+                // Configured endpoints are reserved even while stopped, so a
+                // duplicate can be corrected before the user presses Start.
                 if (string.Equals(m.Config.PortName, candidate.PortName, StringComparison.OrdinalIgnoreCase))
-                    return $"串口 {candidate.PortName} 正在被映射「{m.Config.Name}」使用，不能同时占用。";
-                if (string.Equals(m.Config.ListenIp, candidate.ListenIp, StringComparison.OrdinalIgnoreCase) &&
-                    m.Config.ListenPort == candidate.ListenPort)
-                    return $"监听地址 {candidate.ListenIp}:{candidate.ListenPort} 正在被映射「{m.Config.Name}」使用。";
+                    return $"COM 串口 {candidate.PortName} 已被映射「{m.Config.Name}」占用。";
+                if (m.Config.ListenPort == candidate.ListenPort &&
+                    (string.Equals(m.Config.ListenIp, candidate.ListenIp, StringComparison.OrdinalIgnoreCase) ||
+                     m.Config.ListenIp == "0.0.0.0" || candidate.ListenIp == "0.0.0.0"))
+                    return $"TCP 端口 {candidate.ListenPort} 已被映射「{m.Config.Name}」占用。";
             }
         }
         if (candidate.ListenPort is < 1 or > 65535)
