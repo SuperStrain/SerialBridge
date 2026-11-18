@@ -66,16 +66,18 @@ public partial class App : Application
     /// <summary>Raised after every theme application so all theme selectors stay in sync.</summary>
     public static event Action<string>? ThemeChanged;
 
+    public static ApplicationTheme GetEffectiveTheme(string theme) => theme switch
+    {
+        "Dark" => ApplicationTheme.Dark,
+        "Auto" => ApplicationThemeManager.GetSystemTheme().ToString().Contains("Dark")
+            ? ApplicationTheme.Dark
+            : ApplicationTheme.Light,
+        _ => ApplicationTheme.Light,
+    };
+
     public static void ApplyTheme(string theme)
     {
-        var mode = theme switch
-        {
-            "Dark" => ApplicationTheme.Dark,
-            "Auto" => ApplicationThemeManager.GetSystemTheme().ToString().Contains("Dark")
-                ? ApplicationTheme.Dark
-                : ApplicationTheme.Light,
-            _ => ApplicationTheme.Light,
-        };
+        var mode = GetEffectiveTheme(theme);
         ApplicationThemeManager.Apply(mode);
 
         // WPF-UI 的填充刷子带透明度，弹层需要完全不透明的底色才可读；
