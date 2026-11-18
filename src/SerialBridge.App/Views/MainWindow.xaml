@@ -7,6 +7,7 @@
     xmlns:views="clr-namespace:SerialBridge.App.Views"
     xmlns:conv="clr-namespace:SerialBridge.App.Converters"
     xmlns:tb="clr-namespace:H.NotifyIcon;assembly=H.NotifyIcon.Wpf"
+    xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
     Title="SerialBridge — 串口网络桥接工具"
     Width="1180" Height="820"
     MinWidth="1080" MinHeight="640"
@@ -196,6 +197,7 @@
             <Border x:Name="UpdateBadge" HorizontalAlignment="Left" VerticalAlignment="Center"
                     Margin="12,0,0,0" Background="#1A16A34A" CornerRadius="4" Padding="7,2"
                     Cursor="Hand" MouseLeftButtonDown="OnUpdateBadgeClick"
+                    shell:WindowChrome.IsHitTestVisibleInChrome="True"
                     ToolTip="{Binding UpdateBadgeVersion}"
                     Visibility="{Binding UpdateBadgeVisible, Converter={StaticResource BoolToVisibility}}">
                 <TextBlock Text="NEW" FontSize="11" FontWeight="Bold" Foreground="#16A34A" />
