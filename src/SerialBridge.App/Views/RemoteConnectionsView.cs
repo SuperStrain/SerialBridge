@@ -19,6 +19,7 @@ public sealed class RemoteConnectionsView : UserControl
     // Reuse row controls across timer ticks so scrolling, keyboard focus and
     // in-progress button interactions are never destroyed by a status refresh.
     private readonly Dictionary<Guid, SavedConnectionRow> _savedRows = new();
+    private RemoteTcpSession? _lastConnectAttempt;
 
     private sealed record SavedConnectionRow(
         Border Container, TextBlock Name, TextBlock Details, Button ConnectionButton);
@@ -153,7 +154,14 @@ public sealed class RemoteConnectionsView : UserControl
                 $"{(session.IsConnected ? "已连接" : "未连接")} · " +
                 $"发送 {session.SentBytes:N0} B / 接收 {session.ReceivedBytes:N0} B";
             row.ConnectionButton.Content = session.IsConnected ? "断开" : "连接";
+            if (!session.IsConnected && session.WasQuickDisconnect)
+                row.Details.Text += " · " + session.LastDisconnectReason;
         }
+        // A TCP handshake can report success just before the server closes
+        // an over-limit connection. Correct the success notice on the next tick.
+        if (_lastConnectAttempt is { IsConnected: false, WasQuickDisconnect: true } recent &&
+            (_status.Text == "连接成功。" || _status.Text == "已连接并打开终端。"))
+            _status.Text = recent.LastDisconnectReason;
     }
 
     private SavedConnectionRow CreateSavedRow(SerialBridge.Core.Tcp.RemoteTcpSession session)
@@ -178,7 +186,11 @@ public sealed class RemoteConnectionsView : UserControl
             try
             {
                 if (session.IsConnected) await AppServices.Remotes.DisconnectAsync(session);
-                else await AppServices.Remotes.ConnectAsync(session);
+                else
+                {
+                    _lastConnectAttempt = session;
+                    await AppServices.Remotes.ConnectAsync(session);
+                }
                 _status.Text = session.IsConnected ? "连接成功。" : "连接已断开。";
             }
             catch (Exception ex) { _status.Text = "连接失败：" + ex.Message; }
@@ -256,8 +268,9 @@ public sealed class RemoteConnectionsView : UserControl
                         }
                         try
                         {
+                            _lastConnectAttempt = existing;
                             await AppServices.Remotes.ConnectAsync(existing);
-                            TerminalWindow.OpenFor(existing);
+                            if (existing.IsConnected) TerminalWindow.OpenFor(existing);
                             _status.Text = "已连接并打开终端。";
                         }
                         catch (Exception ex) { _status.Text = "连接失败：" + ex.Message; }
