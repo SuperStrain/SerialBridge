@@ -13,10 +13,18 @@ public sealed class RemoteConnectionsView : UserControl
 {
     private readonly StackPanel _savedList = new();
     private readonly StackPanel _discoveredList = new();
+    private readonly ComboBox _discoveryMode = new()
+    {
+        Width = 125,
+        ItemsSource = new[] { "本机网段", "指定网段" },
+        SelectedIndex = 0
+    };
     private readonly TextBox _discoveryTarget = new()
     {
         MinWidth = 180, MaxWidth = 230,
-        ToolTip = "可选：填写另一网段已知 SerialBridge 主机的 IPv4 地址"
+        Text = "192.168.2.0/24",
+        ToolTip = "输入目标 IPv4 网段，如 192.168.2.0/24（最多扫描 254 个地址）",
+        IsEnabled = false
     };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private readonly System.Windows.Threading.DispatcherTimer _refresh;
@@ -68,17 +76,20 @@ public sealed class RemoteConnectionsView : UserControl
         });
         var discoveryControls = new StackPanel { Orientation = Orientation.Horizontal };
         discoveryControls.Children.Add(Action("扫描局域网", async () => await ScanAsync()));
+        discoveryControls.Children.Add(_discoveryMode);
         discoveryControls.Children.Add(new TextBlock
         {
-            Text = "跨网段目标 IP（可选）",
+            Text = "目标网段",
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 8, 0)
         });
         discoveryControls.Children.Add(_discoveryTarget);
+        _discoveryMode.SelectionChanged += (_, _) =>
+            _discoveryTarget.IsEnabled = _discoveryMode.SelectedIndex == 1;
         discoveryHeader.Children.Add(discoveryControls);
         discoveryHeader.Children.Add(new TextBlock
         {
-            Text = "自动发现使用本地子网广播；跨网段时需填写已知主机 IP，且路由和防火墙允许 UDP 39001。",
+            Text = "本机网段使用广播；指定网段使用限速 UDP 单播（/24～/32），需目标网段可路由且防火墙放行 UDP 39001。",
             Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 8, 0, 0)
         });
@@ -256,21 +267,23 @@ public sealed class RemoteConnectionsView : UserControl
 
     private async Task ScanAsync()
     {
-        var targetText = _discoveryTarget.Text.Trim();
-        IPAddress? target = null;
-        if (!string.IsNullOrEmpty(targetText) &&
-            (!IPAddress.TryParse(targetText, out target) ||
-             target.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork))
+        string? subnet = null;
+        if (_discoveryMode.SelectedIndex == 1)
         {
-            _status.Text = "目标 IP 无效，请输入 IPv4 地址。";
-            return;
+            subnet = _discoveryTarget.Text.Trim();
+            try { LanDiscoveryScanner.ExpandCidr(subnet); }
+            catch (ArgumentException ex)
+            {
+                _status.Text = ex.Message;
+                return;
+            }
         }
-        _status.Text = "正在扫描局域网（约 2 秒）…";
+        _status.Text = "正在扫描局域网（约 3 秒）…";
         _discoveredList.Children.Clear();
         try
         {
-            var devices = await LanDiscoveryScanner.ScanAsync(TimeSpan.FromSeconds(2),
-                targetHost: target);
+            var devices = await LanDiscoveryScanner.ScanAsync(TimeSpan.FromSeconds(3),
+                targetSubnet: subnet);
             _status.Text = devices.Count == 0
                 ? "未发现设备。请确认对方允许被发现、映射正在监听且防火墙未拦截 UDP 39001。"
                 : $"发现 {devices.Count} 台设备。";
