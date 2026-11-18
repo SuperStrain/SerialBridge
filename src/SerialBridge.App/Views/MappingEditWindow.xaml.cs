@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Net;
+using System.Net.Sockets;
 using SerialBridge.App.Services;
 using SerialBridge.App.ViewModels;
 using SerialBridge.Core.Bridge;
@@ -36,6 +38,35 @@ public partial class MappingEditWindow : FluentWindow
     // Save is configuration-only. Opening COM may toggle DTR/RTS or reset
     // hardware, so real COM availability is checked only when starting a mapping.
 
+    private string? CheckExternalTcpPort(MappingConfig config)
+    {
+        // TCP bind is side-effect-free compared to opening a physical COM.
+        // Skip probing an endpoint already owned by the mapping being edited.
+        var current = EditTarget?.Runtime;
+        if (current?.IsRunning == true &&
+            current.Config.ListenPort == config.ListenPort &&
+            (current.Config.ListenIp == config.ListenIp ||
+             current.Config.ListenIp == "0.0.0.0"))
+            return null;
+        try
+        {
+            var listener = new TcpListener(IPAddress.Parse(config.ListenIp),
+                config.ListenPort);
+            try { listener.Start(); }
+            finally { listener.Stop(); }
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode is
+            SocketError.AddressAlreadyInUse or SocketError.AccessDenied)
+        {
+            return $"TCP 端口 {config.ListenPort} 已被占用，请更换端口或关闭占用程序。";
+        }
+        catch (Exception ex) when (ex is SocketException or FormatException)
+        {
+            return $"TCP 端口 {config.ListenPort} 无法监听：{ex.Message}";
+        }
+        return null;
+    }
+
     private async void OnSave(object sender, RoutedEventArgs e)
     {
         var config = _viewModel.Build();
@@ -45,7 +76,8 @@ public partial class MappingEditWindow : FluentWindow
             return;
         }
 
-        var error = AppServices.Manager.ValidateForSave(config, EditTarget?.Runtime);
+        var error = AppServices.Manager.ValidateForSave(config, EditTarget?.Runtime)
+                    ?? CheckExternalTcpPort(config);
         if (error is not null)
         {
             ShowSaveError(error);
