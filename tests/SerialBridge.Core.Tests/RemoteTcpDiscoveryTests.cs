@@ -29,6 +29,9 @@ public sealed class RemoteTcpDiscoveryTests
             LanDiscoveryScanner.ExpandCidr("10.0.0.8/32")
                 .Select(address => address.ToString()));
         Assert.Equal(2, LanDiscoveryScanner.ExpandCidr("10.0.0.4/30").Count);
+        Assert.Equal(new[] { "10.0.0.4", "10.0.0.5" },
+            LanDiscoveryScanner.ExpandCidr("10.0.0.4/31")
+                .Select(address => address.ToString()));
     }
 
     [Theory]
