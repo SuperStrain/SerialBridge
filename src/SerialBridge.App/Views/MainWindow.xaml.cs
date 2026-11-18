@@ -41,6 +41,9 @@ public partial class MainWindow : FluentWindow
         Loaded += (_, _) => InitializeTray();
         Closing += OnWindowClosing;
         StateChanged += OnStateChanged;
+        App.ThemeChanged += OnThemeChanged;
+        Closed += (_, _) => App.ThemeChanged -= OnThemeChanged;
+        UpdateThemeIcon(AppServices.Settings.General.Theme);
     }
 
     /// <summary>
@@ -162,23 +165,23 @@ public partial class MainWindow : FluentWindow
     private void OnToggleTheme(object sender, RoutedEventArgs e)
     {
         var current = AppServices.Settings.General.Theme;
-        var next = current == "Dark" ? "Light" : "Dark";
+        // Auto may resolve to either actual theme; toggle based on appearance.
+        var next = App.GetEffectiveTheme(current) == Wpf.Ui.Appearance.ApplicationTheme.Dark
+            ? "Light" : "Dark";
         AppServices.Settings.General.Theme = next;
         App.ApplyTheme(next);
-        // ApplicationThemeManager 在切换时会为窗口写入本地 Background 值，
-        // 覆盖掉 XAML 的 DynamicResource；切回浅色后旧深色值会残留（标题栏发黑）。
-        // 这里在其处理完成后重新挂回资源引用，让背景继续跟随主题。
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
-        {
-            ClearValue(BackgroundProperty);
-            SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
-        }));
-        var icon = FindName("ThemeIcon") as Wpf.Ui.Controls.SymbolIcon;
-        if (icon is not null)
-            icon.Symbol = next == "Dark"
-                ? Wpf.Ui.Controls.SymbolRegular.WeatherSunny24
-                : Wpf.Ui.Controls.SymbolRegular.WeatherMoon24;
         AppServices.SaveSettingsSafe();
+    }
+
+    private void OnThemeChanged(string theme) => UpdateThemeIcon(theme);
+
+    private void UpdateThemeIcon(string theme)
+    {
+        var icon = FindName("ThemeIcon") as Wpf.Ui.Controls.SymbolIcon;
+        if (icon is null) return;
+        icon.Symbol = App.GetEffectiveTheme(theme) == Wpf.Ui.Appearance.ApplicationTheme.Dark
+            ? Wpf.Ui.Controls.SymbolRegular.WeatherSunny24
+            : Wpf.Ui.Controls.SymbolRegular.WeatherMoon24;
     }
 
     // ---------- 页面导航 ----------
