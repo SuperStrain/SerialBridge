@@ -116,9 +116,12 @@ public sealed class RemoteConnectionsView : UserControl
         _pendingDisconnectWarnings.Clear();
     }
 
-    private void ClearDisconnectWarning(RemoteTcpSession session)
+    private void ClearDisconnectWarning(RemoteTcpSession session, Action<string>? expected = null)
     {
-        if (!_pendingDisconnectWarnings.Remove(session, out var callback)) return;
+        // A superseded attempt must not remove the newer attempt's handler.
+        if (!_pendingDisconnectWarnings.TryGetValue(session, out var callback) ||
+            (expected is not null && !ReferenceEquals(expected, callback))) return;
+        _pendingDisconnectWarnings.Remove(session);
         session.ConnectionLost -= callback;
     }
 
@@ -212,6 +215,9 @@ public sealed class RemoteConnectionsView : UserControl
         Action<string>? lost = null;
         lost = reason =>
         {
+            // Snapshot this connection's classification before auto-reconnect
+            // can reset WasQuickDisconnect for the next generation.
+            var wasQuickDisconnect = session.WasQuickDisconnect;
             session.ConnectionLost -= lost;
             Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -220,7 +226,7 @@ public sealed class RemoteConnectionsView : UserControl
                     ReferenceEquals(current, lost))
                     _pendingDisconnectWarnings.Remove(session);
                 else return;
-                if (!session.WasQuickDisconnect) return;
+                if (!wasQuickDisconnect) return;
                 var owner = Window.GetWindow(this);
                 if (owner is null || !owner.IsLoaded) return;
                 _status.Text = "连接已断开。";
@@ -242,7 +248,7 @@ public sealed class RemoteConnectionsView : UserControl
         }
         catch
         {
-            ClearDisconnectWarning(session);
+            ClearDisconnectWarning(session, lost);
             throw;
         }
     }
