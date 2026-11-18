@@ -31,6 +31,25 @@ public static class NetworkInfo
         return result.Distinct().ToList();
     }
 
+    /// <summary>
+    /// Default CIDR for a user-specified scan: retain the local IPv4 prefix,
+    /// with the last host octet cleared. No hard-coded 192.168.x.x target.
+    /// </summary>
+    public static string? GetDefaultDiscoverySubnet()
+    {
+        var address = GetLocalIPv4Addresses().FirstOrDefault();
+        return address is null ? null : DiscoverySubnetFromAddress(address);
+    }
+
+    public static string DiscoverySubnetFromAddress(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetwork ||
+            IPAddress.IsLoopback(address))
+            throw new ArgumentException("需要有效的本机 IPv4 地址。", nameof(address));
+        var bytes = address.GetAddressBytes();
+        return $"{bytes[0]}.{bytes[1]}.{bytes[2]}.0/24";
+    }
+
     /// <summary>获取首选展示地址：取第一个活动 IPv4。</summary>
     public static string GetPrimaryIPv4()
     {
