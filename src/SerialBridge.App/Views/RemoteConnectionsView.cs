@@ -32,6 +32,7 @@ public sealed class RemoteConnectionsView : UserControl
     // Reuse row controls across timer ticks so scrolling, keyboard focus and
     // in-progress button interactions are never destroyed by a status refresh.
     private readonly Dictionary<Guid, SavedConnectionRow> _savedRows = new();
+    private readonly Dictionary<RemoteTcpSession, Action<string>> _pendingDisconnectWarnings = new();
 
     private sealed record SavedConnectionRow(
         Border Container, TextBlock Name, TextBlock Details, Button ConnectionButton);
@@ -107,7 +108,19 @@ public sealed class RemoteConnectionsView : UserControl
     }
 
     /// <summary>宿主窗口真正关闭时停止状态刷新计时器。</summary>
-    public void StopRefresh() => _refresh.Stop();
+    public void StopRefresh()
+    {
+        _refresh.Stop();
+        foreach (var (session, callback) in _pendingDisconnectWarnings)
+            session.ConnectionLost -= callback;
+        _pendingDisconnectWarnings.Clear();
+    }
+
+    private void ClearDisconnectWarning(RemoteTcpSession session)
+    {
+        if (!_pendingDisconnectWarnings.Remove(session, out var callback)) return;
+        session.ConnectionLost -= callback;
+    }
 
     private static Button Action(string label, Action handler)
     {
@@ -195,14 +208,19 @@ public sealed class RemoteConnectionsView : UserControl
     /// </summary>
     private async Task ConnectWithNoticeAsync(RemoteTcpSession session, string successMessage)
     {
+        ClearDisconnectWarning(session);
         Action<string>? lost = null;
         lost = reason =>
         {
             session.ConnectionLost -= lost;
-            if (!session.WasQuickDisconnect) return;
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 // The view can outlive a navigation change, but not its window.
+                if (_pendingDisconnectWarnings.TryGetValue(session, out var current) &&
+                    ReferenceEquals(current, lost))
+                    _pendingDisconnectWarnings.Remove(session);
+                else return;
+                if (!session.WasQuickDisconnect) return;
                 var owner = Window.GetWindow(this);
                 if (owner is null || !owner.IsLoaded) return;
                 _status.Text = "连接已断开。";
@@ -213,6 +231,7 @@ public sealed class RemoteConnectionsView : UserControl
                 RefreshSaved();
             }));
         };
+        _pendingDisconnectWarnings[session] = lost;
         session.ConnectionLost += lost;
         try
         {
@@ -223,7 +242,7 @@ public sealed class RemoteConnectionsView : UserControl
         }
         catch
         {
-            session.ConnectionLost -= lost;
+            ClearDisconnectWarning(session);
             throw;
         }
     }
@@ -249,7 +268,11 @@ public sealed class RemoteConnectionsView : UserControl
         {
             try
             {
-                if (session.IsConnected) await AppServices.Remotes.DisconnectAsync(session);
+                if (session.IsConnected)
+                {
+                    ClearDisconnectWarning(session);
+                    await AppServices.Remotes.DisconnectAsync(session);
+                }
                 else await ConnectWithNoticeAsync(session, "连接成功。");
                 if (!session.IsConnected) _status.Text = "连接已断开。";
             }
@@ -271,6 +294,7 @@ public sealed class RemoteConnectionsView : UserControl
         {
             try
             {
+                ClearDisconnectWarning(session);
                 await AppServices.Remotes.RemoveAsync(session);
                 AppServices.SaveSettingsSafe();
                 _status.Text = "连接配置已删除。";
