@@ -3,9 +3,11 @@
 
   # SerialBridge
 
-  **让 AI Agent 通过局域网，跨电脑远程访问并操作真实设备串口。**
+  **让 AI Agent 突破本机串口限制，通过局域网远程操作其他电脑连接的硬件设备。**
 
-  **设备串口插在 Windows 电脑上，AI Agent 可以在局域网内的另一台电脑上远程操作。** SerialBridge 将物理 COM 口转换为原始 TCP 服务，让 Agent 跨电脑读取串口日志、发送诊断命令并分析反馈；也支持通过内置远程连接访问其他 SerialBridge。
+  AI Agent 可以直接操作本机串口，但当设备连接在另一台电脑上时，如何远程访问？
+
+SerialBridge 将 Windows 物理串口转换为局域网 TCP 服务，让其他电脑上的 AI Agent 无需直接连接硬件，就能跨电脑读取串口日志、发送调试命令并分析设备反馈；也支持通过内置远程连接访问其他 SerialBridge。
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
@@ -20,7 +22,7 @@
 
 ---
 
-## ⚡ 快速开始：AI Agent 跨电脑远程操作设备串口
+## ⚡ 快速开始：让 AI Agent 跨电脑访问设备串口
 
 **目标：** 开发板的物理串口连接在 Windows 电脑 A 上；AI Agent 在同一可信局域网的电脑 B 上，**通过 TCP 跨电脑访问设备串口**，读取日志、执行诊断命令并分析结果。
 
