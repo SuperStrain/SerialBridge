@@ -13,6 +13,11 @@ public sealed class RemoteConnectionsView : UserControl
 {
     private readonly StackPanel _savedList = new();
     private readonly StackPanel _discoveredList = new();
+    private readonly TextBox _discoveryTarget = new()
+    {
+        MinWidth = 180, MaxWidth = 230,
+        ToolTip = "可选：填写另一网段已知 SerialBridge 主机的 IPv4 地址"
+    };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private readonly System.Windows.Threading.DispatcherTimer _refresh;
 
@@ -61,7 +66,22 @@ public sealed class RemoteConnectionsView : UserControl
             TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray,
             Margin = new Thickness(0, 0, 0, 10)
         });
-        discoveryHeader.Children.Add(Action("扫描局域网", async () => await ScanAsync()));
+        var discoveryControls = new StackPanel { Orientation = Orientation.Horizontal };
+        discoveryControls.Children.Add(Action("扫描局域网", async () => await ScanAsync()));
+        discoveryControls.Children.Add(new TextBlock
+        {
+            Text = "跨网段目标 IP（可选）",
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 8, 0)
+        });
+        discoveryControls.Children.Add(_discoveryTarget);
+        discoveryHeader.Children.Add(discoveryControls);
+        discoveryHeader.Children.Add(new TextBlock
+        {
+            Text = "自动发现使用本地子网广播；跨网段时需填写已知主机 IP，且路由和防火墙允许 UDP 39001。",
+            Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0)
+        });
         DockPanel.SetDock(discoveryHeader, Dock.Top);
         discoveryRoot.Children.Add(discoveryHeader);
         discoveryRoot.Children.Add(new ScrollViewer
@@ -236,20 +256,31 @@ public sealed class RemoteConnectionsView : UserControl
 
     private async Task ScanAsync()
     {
+        var targetText = _discoveryTarget.Text.Trim();
+        IPAddress? target = null;
+        if (!string.IsNullOrEmpty(targetText) &&
+            (!IPAddress.TryParse(targetText, out target) ||
+             target.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork))
+        {
+            _status.Text = "目标 IP 无效，请输入 IPv4 地址。";
+            return;
+        }
         _status.Text = "正在扫描局域网（约 2 秒）…";
         _discoveredList.Children.Clear();
         try
         {
-            var devices = await LanDiscoveryScanner.ScanAsync(TimeSpan.FromSeconds(2));
+            var devices = await LanDiscoveryScanner.ScanAsync(TimeSpan.FromSeconds(2),
+                targetHost: target);
             _status.Text = devices.Count == 0
                 ? "未发现设备。请确认对方允许被发现、映射正在监听且防火墙未拦截 UDP 39001。"
                 : $"发现 {devices.Count} 台设备。";
             foreach (var device in devices)
             {
                 var group = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
+                var isLocal = device.DeviceId == AppServices.Settings.DiscoveryDeviceId;
                 group.Children.Add(new TextBlock
                 {
-                    Text = $"{device.Name}  ·  {device.Address}",
+                    Text = $"{device.Name}{(isLocal ? "（本机）" : "")}  ·  {device.Address}",
                     FontSize = 16, FontWeight = FontWeights.SemiBold
                 });
                 foreach (var mapping in device.Mappings)
