@@ -621,7 +621,7 @@ public sealed class MappingReservationTests
     }
 
     [Fact]
-    public async Task LegacyStoppedAlternateMappingsCanStillStart()
+    public void LegacyStoppedAlternateMappingsCanStillStart()
     {
         using var manager = new SerialBridge.Core.Management.MappingManager();
         var first = manager.CreateMapping(new MappingConfig
@@ -638,6 +638,5 @@ public sealed class MappingReservationTests
         Assert.Null(manager.ValidateNew(first.Config, first));
         Assert.Null(manager.ValidateNew(second.Config, second));
         Assert.Contains("COM 串口", manager.ValidateForSave(first.Config, second));
-        await Task.CompletedTask;
     }
 }
