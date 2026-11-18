@@ -24,19 +24,38 @@ public sealed class MappingManager : IDisposable
     public long TotalRxBytes { get { lock (_gate) return _mappings.Sum(m => m.SerialRxBytes); } }
     public long TotalTxBytes { get { lock (_gate) return _mappings.Sum(m => m.SerialTxBytes); } }
 
-    /// <summary>校验结果（供 UI 展示的友好错误）。</summary>
+    /// <summary>
+    /// Saving a NEW configuration reserves its COM and TCP endpoint even when
+    /// other mappings are stopped. Existing configurations remain compatible.
+    /// </summary>
+    public string? ValidateForSave(MappingConfig candidate, MappingRuntime? self = null)
+        => ValidateConflict(candidate, self, includeStopped: true);
+
+    /// <summary>
+    /// Runtime admission uses only running mappings. Legacy alternate mappings
+    /// that share a COM port remain usable when the other mapping is stopped.
+    /// </summary>
     public string? ValidateNew(MappingConfig candidate, MappingRuntime? self = null)
+        => ValidateConflict(candidate, self, includeStopped: false);
+
+    private string? ValidateConflict(MappingConfig candidate, MappingRuntime? self,
+        bool includeStopped)
     {
         lock (_gate)
         {
-            foreach (var m in _mappings)
+            foreach (var mapping in _mappings)
             {
-                if (ReferenceEquals(m, self) || !m.IsRunning) continue;
-                if (string.Equals(m.Config.PortName, candidate.PortName, StringComparison.OrdinalIgnoreCase))
-                    return $"串口 {candidate.PortName} 正在被映射「{m.Config.Name}」使用，不能同时占用。";
-                if (string.Equals(m.Config.ListenIp, candidate.ListenIp, StringComparison.OrdinalIgnoreCase) &&
-                    m.Config.ListenPort == candidate.ListenPort)
-                    return $"监听地址 {candidate.ListenIp}:{candidate.ListenPort} 正在被映射「{m.Config.Name}」使用。";
+                if (ReferenceEquals(mapping, self) ||
+                    (!includeStopped && !mapping.IsRunning)) continue;
+                var other = mapping.Config;
+                if (string.Equals(other.PortName, candidate.PortName,
+                    StringComparison.OrdinalIgnoreCase))
+                    return $"COM 串口 {candidate.PortName} 已被映射「{other.Name}」占用。";
+                if (other.ListenPort == candidate.ListenPort &&
+                    (string.Equals(other.ListenIp, candidate.ListenIp,
+                         StringComparison.OrdinalIgnoreCase) ||
+                     other.ListenIp == "0.0.0.0" || candidate.ListenIp == "0.0.0.0"))
+                    return $"TCP 端口 {candidate.ListenPort} 已被映射「{other.Name}」占用。";
             }
         }
         if (candidate.ListenPort is < 1 or > 65535)

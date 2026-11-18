@@ -576,3 +576,67 @@ public sealed class BridgeTests : IAsyncLifetime
         Assert.True(condition(), $"等待条件超时（{(timeout ?? TimeSpan.FromSeconds(5)).TotalSeconds}s）");
     }
 }
+
+public sealed class MappingReservationTests
+{
+    [Fact]
+    public void SaveValidationRejectsOccupiedComAndTcpAcrossStoppedMappings()
+    {
+        using var manager = new SerialBridge.Core.Management.MappingManager();
+        manager.CreateMapping(new MappingConfig
+        {
+            Name = "A", PortName = "COM31", ListenIp = "0.0.0.0", ListenPort = 29001
+        });
+        var duplicateCom = new MappingConfig
+        {
+            Name = "B", PortName = "com31", ListenIp = "127.0.0.1", ListenPort = 29002
+        };
+        Assert.Contains("COM 串口", manager.ValidateForSave(duplicateCom));
+        var overlappingEndpoint = new MappingConfig
+        {
+            Name = "C", PortName = "COM32", ListenIp = "127.0.0.1", ListenPort = 29001
+        };
+        Assert.Contains("TCP 端口", manager.ValidateForSave(overlappingEndpoint));
+        var independent = new MappingConfig
+        {
+            Name = "D", PortName = "COM33", ListenIp = "127.0.0.1", ListenPort = 29003
+        };
+        Assert.Null(manager.ValidateForSave(independent));
+    }
+
+    [Fact]
+    public void SaveValidationAllowsDistinctExplicitIpBindingsOnSamePort()
+    {
+        using var manager = new SerialBridge.Core.Management.MappingManager();
+        var first = manager.CreateMapping(new MappingConfig
+        {
+            Name = "A", PortName = "COM41", ListenIp = "192.0.2.1", ListenPort = 29001
+        });
+        var second = new MappingConfig
+        {
+            Name = "B", PortName = "COM42", ListenIp = "192.0.2.2", ListenPort = 29001
+        };
+        Assert.Null(manager.ValidateForSave(second));
+        Assert.Null(manager.ValidateForSave(first.Config, first));
+    }
+
+    [Fact]
+    public void LegacyStoppedAlternateMappingsCanStillStart()
+    {
+        using var manager = new SerialBridge.Core.Management.MappingManager();
+        var first = manager.CreateMapping(new MappingConfig
+        {
+            Name = "备用一", PortName = "COM51", ListenIp = "127.0.0.1", ListenPort = 29011
+        });
+        var second = manager.CreateMapping(new MappingConfig
+        {
+            Name = "备用二", PortName = "COM51", ListenIp = "127.0.0.1", ListenPort = 29012
+        });
+        // Historic configuration may contain duplicate COM ports. Saving NEW
+        // mappings forbids them, but starting an alternate when both are
+        // stopped must not be blocked by a merely configured mapping.
+        Assert.Null(manager.ValidateNew(first.Config, first));
+        Assert.Null(manager.ValidateNew(second.Config, second));
+        Assert.Contains("COM 串口", manager.ValidateForSave(first.Config, second));
+    }
+}

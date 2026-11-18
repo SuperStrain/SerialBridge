@@ -19,6 +19,34 @@ public sealed class RemoteTcpDiscoveryTests
     }
 
     [Fact]
+    public void SubnetDiscovery_ExpandsOnlyHostAddresses()
+    {
+        var hosts = LanDiscoveryScanner.ExpandCidr("192.168.2.42/24");
+        Assert.Equal(254, hosts.Count);
+        Assert.Equal("192.168.2.1", hosts[0].ToString());
+        Assert.Equal("192.168.2.254", hosts[^1].ToString());
+        Assert.Equal(new[] { "10.0.0.8" },
+            LanDiscoveryScanner.ExpandCidr("10.0.0.8/32")
+                .Select(address => address.ToString()));
+        Assert.Equal(2, LanDiscoveryScanner.ExpandCidr("10.0.0.4/30").Count);
+        Assert.Equal(new[] { "10.0.0.4", "10.0.0.5" },
+            LanDiscoveryScanner.ExpandCidr("10.0.0.4/31")
+                .Select(address => address.ToString()));
+    }
+
+    [Theory]
+    [InlineData("192.168.2.0/23")]
+    [InlineData("192.168.2.0/33")]
+    [InlineData("192.168.2.0")]
+    [InlineData("not-an-ip/24")]
+    [InlineData("127.0.0.1/32")]
+    [InlineData("224.0.0.1/32")]
+    public void SubnetDiscovery_RejectsInvalidOrUnsafeRanges(string cidr)
+    {
+        Assert.Throws<ArgumentException>(() => LanDiscoveryScanner.ExpandCidr(cidr));
+    }
+
+    [Fact]
     public async Task RemoteSession_ExchangesRawBytesAndSurvivesTerminalOwnership()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

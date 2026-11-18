@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Net;
+using System.Net.Sockets;
 using SerialBridge.App.Services;
 using SerialBridge.App.ViewModels;
 using SerialBridge.Core.Bridge;
@@ -26,32 +28,85 @@ public partial class MappingEditWindow : FluentWindow
 
     private MappingViewModel? EditTarget { get; }
 
-    private void OnSave(object sender, RoutedEventArgs e)
+    private void ShowSaveError(string message)
+    {
+        _viewModel.FailExternal(message);
+        System.Windows.MessageBox.Show(this, message, "无法保存映射",
+            System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+    }
+
+    // Save is configuration-only. Opening COM may toggle DTR/RTS or reset
+    // hardware, so real COM availability is checked only when starting a mapping.
+
+    private string? CheckExternalTcpPort(MappingConfig config)
+    {
+        // TCP bind is side-effect-free compared to opening a physical COM.
+        // Skip probing an endpoint already owned by the mapping being edited.
+        var current = EditTarget?.Runtime;
+        if (current?.IsRunning == true &&
+            current.Config.ListenPort == config.ListenPort &&
+            (current.Config.ListenIp == config.ListenIp ||
+             current.Config.ListenIp == "0.0.0.0"))
+            return null;
+        try
+        {
+            var listener = new TcpListener(IPAddress.Parse(config.ListenIp),
+                config.ListenPort);
+            try { listener.Start(); }
+            finally { listener.Stop(); }
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode is
+            SocketError.AddressAlreadyInUse or SocketError.AccessDenied)
+        {
+            return $"TCP 端口 {config.ListenPort} 已被占用，请更换端口或关闭占用程序。";
+        }
+        catch (Exception ex) when (ex is SocketException or FormatException)
+        {
+            return $"TCP 端口 {config.ListenPort} 无法监听：{ex.Message}";
+        }
+        return null;
+    }
+
+    private async void OnSave(object sender, RoutedEventArgs e)
     {
         var config = _viewModel.Build();
-        if (config is null) return;
-
-        // 与运行中的其他映射做互斥检查
-        if (EditTarget is not null)
+        if (config is null)
         {
-            var error = AppServices.Manager.ValidateNew(config, EditTarget.Runtime);
-            if (error is not null)
-            {
-                _viewModel.FailExternal(error);
-                return;
-            }
-
-            var wasRunning = EditTarget.Runtime.IsRunning;
-            _ = ApplyEditAsync(config, wasRunning);
+            ShowSaveError(_viewModel.ErrorMessage);
+            return;
         }
-        else
+
+        var error = AppServices.Manager.ValidateForSave(config, EditTarget?.Runtime)
+                    ?? CheckExternalTcpPort(config);
+        if (error is not null)
         {
-            var rt = AppServices.Manager.CreateMapping(config);
-            if (config.AutoStart)
-                _ = StartNewAsync(rt);
-            AppServices.SaveSettingsSafe();
-            _viewModel.MarkConfirmed();
-            Close();
+            ShowSaveError(error);
+            return;
+        }
+
+        try
+        {
+            if (EditTarget is not null)
+            {
+                await ApplyEditAsync(config, EditTarget.Runtime.IsRunning);
+            }
+            else
+            {
+                var rt = AppServices.Manager.CreateMapping(config);
+                if (config.AutoStart)
+                {
+                    var startError = await AppServices.Manager.StartMappingAsync(rt);
+                    if (startError is not null)
+                        ShowSaveError($"映射已保存，但自动启动失败：{startError}");
+                }
+                AppServices.SaveSettingsSafe();
+                _viewModel.MarkConfirmed();
+                Close();
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowSaveError($"保存映射失败：{ex.Message}");
         }
     }
 
@@ -61,7 +116,7 @@ public partial class MappingEditWindow : FluentWindow
         var error = await AppServices.Manager.ReplaceMappingAsync(rt, config);
         if (error is not null)
         {
-            _viewModel.FailExternal(error);
+            ShowSaveError(error);
             return;
         }
         // ReplaceMappingAsync updates the existing config object in place.
@@ -70,9 +125,10 @@ public partial class MappingEditWindow : FluentWindow
         AppServices.SaveSettingsSafe();
         if (wasRunning)
         {
-            await AppServices.Manager.StartMappingAsync(rt);
+            var startError = await AppServices.Manager.StartMappingAsync(rt);
             EditTarget.Update();
             AppServices.SaveSettingsSafe();
+            if (startError is not null) ShowSaveError($"映射已保存，但启动失败：{startError}");
         }
         _viewModel.MarkConfirmed();
         Dispatcher.Invoke(Close);
