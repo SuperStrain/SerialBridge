@@ -3,9 +3,11 @@
 
   # SerialBridge
 
-  **Let AI agents remotely access and operate device serial ports across computers on a LAN.**
+  **Let AI agents go beyond local serial ports and operate hardware connected to another computer over a LAN.**
 
-  **The serial cable stays plugged into a Windows PC; an AI agent can work with that device from another computer on the same LAN.** SerialBridge exposes the physical COM port over raw TCP, allowing agents to read logs, send diagnostic commands, and analyze responses remotely. Its built-in client can also access other SerialBridge instances.
+  AI agents can already access local serial ports. But how do they access a device connected to a different computer?
+
+SerialBridge exposes a Windows PC's physical serial port as a raw TCP service on the LAN. An AI agent running on another computer can read logs, send diagnostic commands, and analyze device responses without a direct hardware connection. SerialBridge can also connect to other instances through its built-in remote client.
 
   [![Build & Release](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/SuperStrain/SerialBridge/actions/workflows/build.yml)
   [![Latest Release](https://img.shields.io/github/v/release/SuperStrain/SerialBridge?display_name=tag)](https://github.com/SuperStrain/SerialBridge/releases/latest)
@@ -20,7 +22,7 @@
 
 ---
 
-## ⚡ Quick start: remote serial access for AI agents over a LAN
+## ⚡ Quick start: let AI agents access serial ports on another computer
 
 **Goal:** An embedded Linux board's serial port is connected to Windows PC A. An AI agent on PC B, on the same trusted LAN, **accesses the device serial console remotely over TCP** to read logs, run diagnostic commands, and analyze the responses.
 
