@@ -216,6 +216,19 @@ public static class LanDiscoveryScanner
         using var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         udp.EnableBroadcast = true;
         udp.Client.ReceiveBufferSize = 1024 * 1024;
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows converts ICMP Port Unreachable from an unicast probe
+            // into WSAECONNRESET on ReceiveFrom. A silent non-SB host must not
+            // abort discovery of other hosts.
+            try
+            {
+                const int sioUdpConnReset = -1744830452; // SIO_UDP_CONNRESET
+                udp.Client.IOControl(sioUdpConnReset, new byte[] { 0, 0, 0, 0 },
+                    new byte[4]);
+            }
+            catch (SocketException) { /* Receiver also tolerates ConnectionReset. */ }
+        }
         var requestId = Guid.NewGuid().ToString("D");
         var packet = JsonSerializer.SerializeToUtf8Bytes(new DiscoveryPacket
         {
@@ -250,46 +263,77 @@ public static class LanDiscoveryScanner
             : ExpandCidr(targetSubnet).ToArray();
         foreach (var address in subnetHosts) destinations.Add(address);
 
-        // Rate-limit directed discovery so a /24 does not become a UDP burst.
-        // Local broadcast still happens once per active interface.
-        var sent = 0;
-        foreach (var address in destinations)
-        {
-            token.ThrowIfCancellationRequested();
-            try { await udp.SendAsync(packet, new IPEndPoint(address, LanDiscoveryProtocol.Port), token)
-                .ConfigureAwait(false); }
-            catch (SocketException) { } // One unavailable network interface is not fatal.
-            if (++sent % 16 == 0 && subnetHosts.Length != 0)
-                await Task.Delay(20, token).ConfigureAwait(false);
-        }
         var found = new Dictionary<Guid, DiscoveredDevice>();
         using var window = CancellationTokenSource.CreateLinkedTokenSource(token);
         window.CancelAfter(timeout);
-        while (!window.Token.IsCancellationRequested)
+        // Receive while sending: early responders must not fill the UDP buffer.
+        // Only this task touches 'found' so no cross-thread dictionary access.
+        var receiver = ReceiveResponsesAsync();
+
+        async Task ReceiveResponsesAsync()
         {
-            try
+            while (!window.Token.IsCancellationRequested)
             {
-                var response = await udp.ReceiveAsync(window.Token).ConfigureAwait(false);
-                if (response.Buffer.Length > LanDiscoveryProtocol.MaxPacketBytes) continue;
-                var p = JsonSerializer.Deserialize<DiscoveryPacket>(response.Buffer);
-                if (p?.Magic != LanDiscoveryProtocol.Magic || p.Type != "response" ||
-                    p.RequestId != requestId || p.DeviceId == Guid.Empty ||
-                    p.Mappings is null || p.Mappings.Count > LanDiscoveryProtocol.MaxMappings) continue;
-                var mappings = p.Mappings.Where(m => m is not null &&
-                    m.TcpPort is > 0 and <= 65535 &&
-                    !string.IsNullOrWhiteSpace(m.ComPort) &&
-                    IPAddress.TryParse(m.ConnectAddress(response.RemoteEndPoint.Address.ToString()), out var bindAddress) &&
-                    bindAddress.AddressFamily == AddressFamily.InterNetwork &&
-                    !IPAddress.IsLoopback(bindAddress)).ToArray();
-                var name = (p.Name ?? "").Trim();
-                if (string.IsNullOrWhiteSpace(name)) name = "未命名设备";
-                if (name.Length > 80) name = name[..80];
-                found[p.DeviceId] = new DiscoveredDevice(p.DeviceId, name,
-                    response.RemoteEndPoint.Address.ToString(), mappings);
+                try
+                {
+                    var response = await udp.ReceiveAsync(window.Token).ConfigureAwait(false);
+                    if (response.Buffer.Length > LanDiscoveryProtocol.MaxPacketBytes) continue;
+                    var p = JsonSerializer.Deserialize<DiscoveryPacket>(response.Buffer);
+                    if (p?.Magic != LanDiscoveryProtocol.Magic || p.Type != "response" ||
+                        p.RequestId != requestId || p.DeviceId == Guid.Empty ||
+                        p.Mappings is null || p.Mappings.Count > LanDiscoveryProtocol.MaxMappings) continue;
+                    var mappings = p.Mappings.Where(m => m is not null &&
+                        m.TcpPort is > 0 and <= 65535 &&
+                        !string.IsNullOrWhiteSpace(m.ComPort) &&
+                        IPAddress.TryParse(m.ConnectAddress(response.RemoteEndPoint.Address.ToString()), out var bindAddress) &&
+                        bindAddress.AddressFamily == AddressFamily.InterNetwork &&
+                        !IPAddress.IsLoopback(bindAddress)).ToArray();
+                    var name = (p.Name ?? "").Trim();
+                    if (string.IsNullOrWhiteSpace(name)) name = "未命名设备";
+                    if (name.Length > 80) name = name[..80];
+                    found[p.DeviceId] = new DiscoveredDevice(p.DeviceId, name,
+                        response.RemoteEndPoint.Address.ToString(), mappings);
+                }
+                catch (OperationCanceledException) when (window.IsCancellationRequested) { break; }
+                catch (SocketException ex) when (ex.SocketErrorCode is
+                    SocketError.ConnectionReset or SocketError.HostUnreachable or
+                    SocketError.NetworkUnreachable or SocketError.ConnectionRefused)
+                {
+                    // These apply to an individual unicast probe, not the scan.
+                }
+                catch (SocketException) { break; }
+                catch (Exception ex) when (ex is JsonException or NullReferenceException or ArgumentException) { }
             }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested) { break; }
-            catch (SocketException) { break; }
-            catch (Exception ex) when (ex is JsonException or NullReferenceException or ArgumentException) { }
+        }
+
+        try
+        {
+            var sent = 0;
+            foreach (var address in destinations)
+            {
+                window.Token.ThrowIfCancellationRequested();
+                try
+                {
+                    await udp.SendAsync(packet,
+                        new IPEndPoint(address, LanDiscoveryProtocol.Port), window.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (SocketException) { /* One unreachable target is not fatal. */ }
+                // Max 16 datagrams per 20 ms when subnet probing is enabled.
+                if (++sent % 16 == 0 && subnetHosts.Length != 0)
+                    await Task.Delay(20, window.Token).ConfigureAwait(false);
+            }
+            await receiver.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested &&
+                                                   window.IsCancellationRequested)
+        {
+            // Scan deadline reached while still sending.
+        }
+        finally
+        {
+            window.Cancel();
+            await receiver.ConfigureAwait(false);
         }
         token.ThrowIfCancellationRequested();
         return found.Values.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToArray();
