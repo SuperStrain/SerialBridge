@@ -199,6 +199,67 @@ public sealed class ClientHistoryTests
     }
 
     [Fact]
+    public async Task FullServerRecordsRejectedAttemptWithoutAdmittingIt()
+    {
+        var portProbe = new TcpListener(IPAddress.Loopback, 0);
+        portProbe.Start();
+        var port = ((IPEndPoint)portProbe.LocalEndpoint).Port;
+        portProbe.Stop();
+        var mapping = Guid.NewGuid();
+        await using var store = new ClientHistoryStore(NewDatabasePath());
+        await using var server = new TcpServerService(new MappingConfig
+        {
+            Id = mapping, PortName = "COM99", ListenIp = "127.0.0.1",
+            ListenPort = port, ClientMode = ClientMode.Single
+        }, store);
+        server.Start();
+        using var admitted = new TcpClient();
+        await admitted.ConnectAsync(IPAddress.Loopback, port);
+        Assert.True(SpinWait.SpinUntil(() => server.ClientCount == 1,
+            TimeSpan.FromSeconds(5)));
+        using var rejected = new TcpClient();
+        await rejected.ConnectAsync(IPAddress.Loopback, port);
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        ClientHistoryEntry? entry = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            entry = (await store.GetHistoryAsync(mapping)).FirstOrDefault(
+                row => row.DisconnectReason == "已达客户端上限");
+            if (entry is not null) break;
+            await Task.Delay(25);
+        }
+        Assert.NotNull(entry);
+        Assert.NotNull(entry.DisconnectedAtUtc);
+        Assert.Equal(0, entry.DurationMs);
+        Assert.Equal(0, entry.SentBytes);
+        Assert.Equal(0, entry.ReceivedBytes);
+        Assert.Equal(1, server.ClientCount);
+        Assert.Equal(1, server.TotalAccepted);
+        await server.StopAsync();
+    }
+
+    [Fact]
+    public async Task RejectedAttemptsFollowThousandRecordLimitAndMappingDeletion()
+    {
+        var mapping = Guid.NewGuid();
+        await using var store = new ClientHistoryStore(NewDatabasePath());
+        var start = DateTime.UtcNow.AddHours(-1);
+        for (var i = 0; i < 1003; i++)
+            store.RecordRejected(mapping, $"192.0.2.1:{10000+i}",
+                start.AddMilliseconds(i), "已达客户端上限");
+        var history = await store.GetHistoryAsync(mapping);
+        Assert.Equal(1000, history.Count);
+        Assert.All(history, row =>
+        {
+            Assert.Equal("已达客户端上限", row.DisconnectReason);
+            Assert.Equal(0, row.DurationMs);
+            Assert.NotNull(row.DisconnectedAtUtc);
+        });
+        await store.DeleteMappingAsync(mapping);
+        Assert.Empty(await store.GetHistoryAsync(mapping));
+    }
+
+    [Fact]
     public async Task ImmediateDisconnectsDoNotLoseSessionFinalization()
     {
         var file = NewDatabasePath();

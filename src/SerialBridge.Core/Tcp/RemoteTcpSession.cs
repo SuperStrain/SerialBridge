@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.IO;
+using SerialBridge.Core.Logging;
 using System.Net.Sockets;
 using System.Threading.Channels;
 using SerialBridge.Core.Models;
@@ -21,10 +23,12 @@ public sealed class RemoteTcpSession : IAsyncDisposable
     private bool _disposed;
     private int _generation;
     private string _lastDisconnectReason = "未连接";
+    private bool _quickDisconnect;
 
     public RemoteConnectionConfig Config { get; }
     public bool IsConnected => _connected;
     public string LastDisconnectReason => _lastDisconnectReason;
+    public bool WasQuickDisconnect => _quickDisconnect;
     public long SentBytes => Interlocked.Read(ref _sent);
     public long ReceivedBytes => Interlocked.Read(ref _received);
     public event Action<byte[]>? DataReceived;
@@ -65,8 +69,10 @@ public sealed class RemoteTcpSession : IAsyncDisposable
                 _output = output;
                 _connected = true;
                 _lastDisconnectReason = "";
+                _quickDisconnect = false;
+                var connectedAt = Stopwatch.GetTimestamp();
                 var generation = ++_generation;
-                _worker = RunAsync(client, output, cancel.Token, generation);
+                _worker = RunAsync(client, output, cancel.Token, generation, connectedAt);
                 NotifyStatus();
             }
             catch
@@ -88,8 +94,10 @@ public sealed class RemoteTcpSession : IAsyncDisposable
     }
 
     private async Task RunAsync(TcpClient client, Channel<byte[]> output,
-        CancellationToken token, int generation)
+        CancellationToken token, int generation, long connectedAt)
     {
+        var peerClosedWithoutData = false;
+        var receivedAny = false;
         var reason = "远程连接已断开";
         try
         {
@@ -101,7 +109,12 @@ public sealed class RemoteTcpSession : IAsyncDisposable
                 while (!token.IsCancellationRequested)
                 {
                     var n = await stream.ReadAsync(buffer, token).ConfigureAwait(false);
-                    if (n == 0) break;
+                    if (n == 0)
+                    {
+                        peerClosedWithoutData = true;
+                        break;
+                    }
+                    receivedAny = true;
                     Interlocked.Add(ref _received, n);
                     // Subscribers are UI consumers and must not kill the TCP loop.
                     try { DataReceived?.Invoke(buffer.AsSpan(0, n).ToArray()); }
@@ -134,8 +147,17 @@ public sealed class RemoteTcpSession : IAsyncDisposable
             // Never clear a newer session or report a user-initiated disconnect as lost.
             if (generation == Volatile.Read(ref _generation))
             {
+                // A quick EOF may indicate a server-side limit, but raw TCP
+                // carries no rejection reason. Never claim the cause is certain.
+                var elapsed = Stopwatch.GetElapsedTime(connectedAt);
+                _quickDisconnect = peerClosedWithoutData &&
+                    elapsed < TimeSpan.FromSeconds(1) &&
+                    !receivedAny;
+                if (_quickDisconnect)
+                    reason = "连接后立即断开，可能已达服务端连接数上限";
                 _connected = false;
                 _lastDisconnectReason = reason;
+                LogX.Info($"远程 TCP {Config.Host}:{Config.Port} 已断开（持续 {elapsed.TotalMilliseconds:F0} ms；{reason}）");
                 NotifyStatus();
                 try { ConnectionLost?.Invoke(reason); }
                 catch (Exception) { /* observer failures must not fault worker */ }
