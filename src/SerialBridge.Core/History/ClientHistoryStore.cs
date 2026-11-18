@@ -12,7 +12,7 @@ public sealed record ClientHistoryEntry(
 
 /// <summary>
 /// Single ordered SQLite writer. Producers never do disk I/O on the TCP accept/receive threads.
-/// Only successful connections are recorded. Each mapping retains its latest 1000 completed sessions.
+/// Admitted sessions and rejected attempts are recorded. Each mapping retains its latest 1000 completed records.
 /// </summary>
 public sealed class ClientHistoryStore : IAsyncDisposable
 {
@@ -132,6 +132,51 @@ public sealed class ClientHistoryStore : IAsyncDisposable
                 cmd.Parameters.AddWithValue("$reason", reason);
                 cmd.Parameters.AddWithValue("$id", connectionId.ToString("D"));
                 cmd.Parameters.AddWithValue("$mapping", mappingId.ToString("D"));
+                cmd.ExecuteNonQuery();
+            }
+            using (var prune = db.CreateCommand())
+            {
+                prune.Transaction = transaction;
+                prune.CommandText = """
+                    DELETE FROM ClientHistory
+                    WHERE MappingId=$mapping AND (DisconnectedAtUtc IS NOT NULL OR DisconnectReason='上次运行异常中断')
+                      AND Id NOT IN (
+                        SELECT Id FROM ClientHistory
+                        WHERE MappingId=$mapping AND (DisconnectedAtUtc IS NOT NULL OR DisconnectReason='上次运行异常中断')
+                        ORDER BY ConnectedAtUtc DESC, Id DESC LIMIT $limit
+                      );
+                    """;
+                prune.Parameters.AddWithValue("$mapping", mappingId.ToString("D"));
+                prune.Parameters.AddWithValue("$limit", MaxCompletedPerMapping);
+                prune.ExecuteNonQuery();
+            }
+            transaction.Commit();
+        });
+    }
+
+    /// <summary>
+    /// Record an over-limit TCP attempt as one completed zero-byte entry.
+    /// It never becomes an admitted session and does not affect active client counts.
+    /// </summary>
+    public void RecordRejected(Guid mappingId, string remote, DateTime atUtc, string reason)
+    {
+        Enqueue(mappingId, db =>
+        {
+            using var transaction = db.BeginTransaction();
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = """
+                    INSERT INTO ClientHistory(
+                        Id, MappingId, RemoteAddress, ConnectedAtUtc, DisconnectedAtUtc,
+                        DurationMs, SentBytes, ReceivedBytes, DisconnectReason)
+                    VALUES($id, $mapping, $remote, $at, $at, 0, 0, 0, $reason);
+                    """;
+                cmd.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("D"));
+                cmd.Parameters.AddWithValue("$mapping", mappingId.ToString("D"));
+                cmd.Parameters.AddWithValue("$remote", remote);
+                cmd.Parameters.AddWithValue("$at", new DateTimeOffset(atUtc).ToUnixTimeMilliseconds());
+                cmd.Parameters.AddWithValue("$reason", reason);
                 cmd.ExecuteNonQuery();
             }
             using (var prune = db.CreateCommand())
