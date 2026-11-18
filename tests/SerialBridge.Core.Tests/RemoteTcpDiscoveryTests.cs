@@ -46,6 +46,78 @@ public sealed class RemoteTcpDiscoveryTests
     }
 
     [Fact]
+    public async Task RemoteSession_QuickPeerCloseShowsTentativeLimitHint()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        await using var remote = new RemoteTcpSession(new RemoteConnectionConfig
+        {
+            Host = "127.0.0.1",
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port
+        });
+        try
+        {
+            await remote.ConnectAsync();
+            using var accepted = await listener.AcceptTcpClientAsync()
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            accepted.Client.Shutdown(SocketShutdown.Both);
+            Assert.True(SpinWait.SpinUntil(() => !remote.IsConnected,
+                TimeSpan.FromSeconds(5)));
+            Assert.True(remote.WasQuickDisconnect);
+            Assert.Contains("可能已达服务端连接数上限", remote.LastDisconnectReason);
+        }
+        finally { listener.Stop(); }
+    }
+
+    [Fact]
+    public async Task RemoteSession_PeerSendingBytesBeforeClosingIsNotClassifiedAsLimit()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        await using var remote = new RemoteTcpSession(new RemoteConnectionConfig
+        {
+            Host = "127.0.0.1",
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port
+        });
+        try
+        {
+            await remote.ConnectAsync();
+            using var accepted = await listener.AcceptTcpClientAsync()
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            await accepted.GetStream().WriteAsync(new byte[] { 1 });
+            Assert.True(SpinWait.SpinUntil(() => remote.ReceivedBytes >= 1,
+                TimeSpan.FromSeconds(5)));
+            accepted.Client.Shutdown(SocketShutdown.Both);
+            Assert.True(SpinWait.SpinUntil(() => !remote.IsConnected,
+                TimeSpan.FromSeconds(5)));
+            Assert.False(remote.WasQuickDisconnect);
+        }
+        finally { listener.Stop(); }
+    }
+
+    [Fact]
+    public async Task RemoteSession_ManualDisconnectDoesNotClaimServerLimit()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        await using var remote = new RemoteTcpSession(new RemoteConnectionConfig
+        {
+            Host = "127.0.0.1",
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port
+        });
+        try
+        {
+            await remote.ConnectAsync();
+            using var accepted = await listener.AcceptTcpClientAsync()
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            await remote.DisconnectAsync();
+            Assert.False(remote.IsConnected);
+            Assert.False(remote.WasQuickDisconnect);
+        }
+        finally { listener.Stop(); }
+    }
+
+    [Fact]
     public async Task DiscoveryResponder_IsSilentUntilEnabled_AndOnlyPublishesActiveMappings()
     {
         using var portProbe = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
