@@ -185,8 +185,10 @@ public static class LanDiscoveryScanner
         var mask = prefix == 32 ? uint.MaxValue : uint.MaxValue << (32 - prefix);
         var network = raw & mask;
         var count = 1u << (32 - prefix);
-        var first = prefix == 32 ? 0u : 1u;
-        var end = prefix == 32 ? count : count - 1;
+        // /31 point-to-point prefixes have two valid endpoints and no
+        // network/broadcast reservation; /32 is one host.
+        var first = prefix >= 31 ? 0u : 1u;
+        var end = prefix >= 31 ? count : count - 1;
         var result = new List<IPAddress>();
         for (var offset = first; offset < end; offset++)
         {
