@@ -217,6 +217,10 @@ public sealed class TcpServerService : IAsyncDisposable
     private readonly IpBlacklistService? _blacklist;
     private readonly ConcurrentDictionary<Guid, TcpClientConnection> _clients = new();
     private readonly object _closeGate = new();
+    // Publish, history admission and I/O startup are one critical section.
+    // Manual kicks and blacklist sweeps must not observe a half-initialized client.
+    // Lock order when blacklisting: IpBlacklistService gate -> _admissionGate.
+    private readonly object _admissionGate = new();
     private readonly Dictionary<Guid, Task> _closingTasks = new();
     private CancellationTokenSource _cts = new();
 
@@ -334,39 +338,45 @@ public sealed class TcpServerService : IAsyncDisposable
 
     private void Admit(TcpClient tcp, string remote)
     {
-        var max = MaxClients();
-    if (_clients.Count >= max)
-    {
-        LogX.Warn($"拒绝来自 {remote} 的新连接：已达客户端上限（{max}）。");
-        // TCP handshake completed, but admission was denied. Persist as
-        // a completed, zero-byte rejection rather than a live session.
-        _history?.RecordRejected(_config.Id, remote, DateTime.UtcNow, "已达客户端上限");
-        ClientRejected?.Invoke(remote,
-            _config.ClientMode == ClientMode.Single ? "单客户端模式下已有客户端接入" : $"已达到最大客户端数量（{max}）");
-        try { tcp.Close(); } catch { }
-        return;
-    }
-
-    var conn = new TcpClientConnection(tcp);
-    Interlocked.Increment(ref _totalAccepted);
-    conn.ReceiveAsync = async (c, data, token) =>
-    {
-        try
+        lock (_admissionGate)
         {
-            if (ReceiveFromClientAsync is { } receive)
-                await receive(c, data, token).ConfigureAwait(false);
-            DataFromClient?.Invoke(c, data);
+            var max = MaxClients();
+            if (_clients.Count >= max)
+            {
+                LogX.Warn($"拒绝来自 {remote} 的新连接：已达客户端上限（{max}）。");
+                _history?.RecordRejected(_config.Id, remote, DateTime.UtcNow, "已达客户端上限");
+                ClientRejected?.Invoke(remote,
+                    _config.ClientMode == ClientMode.Single
+                        ? "单客户端模式下已有客户端接入"
+                        : $"已达到最大客户端数量（{max}）");
+                try { tcp.Close(); } catch { }
+                return;
+            }
+
+            var conn = new TcpClientConnection(tcp);
+            conn.ReceiveAsync = async (c, data, token) =>
+            {
+                try
+                {
+                    if (ReceiveFromClientAsync is { } receive)
+                        await receive(c, data, token).ConfigureAwait(false);
+                    DataFromClient?.Invoke(c, data);
+                }
+                catch (Exception ex) { LogX.Error("客户端数据处理异常：" + ex.Message, ex); }
+            };
+            conn.Closed += OnConnectionClosed;
+
+            // Do not allow manual disconnect / blacklist kick between publishing
+            // the connection and queueing its start history + initializing I/O.
+            // The existing Closed handler can run concurrently but never needs
+            // _admissionGate, so no synchronous I/O wait occurs under this lock.
+            _clients[conn.Id] = conn;
+            _history?.RecordConnected(_config.Id, conn.Id, conn.RemoteEndPoint, conn.ConnectedAtUtc);
+            conn.Start();
+            Interlocked.Increment(ref _totalAccepted);
+            LogX.Info($"客户端已连接：{remote}（当前 {_clients.Count}/{max}）");
+            ClientConnected?.Invoke(conn);
         }
-        catch (Exception ex) { LogX.Error("客户端数据处理异常：" + ex.Message, ex); }
-    };
-    conn.Closed += OnConnectionClosed;
-    _clients[conn.Id] = conn;
-    // Record admission before starting reads: a very fast disconnect must not
-    // put the end event ahead of its start in the persistent writer queue.
-    _history?.RecordConnected(_config.Id, conn.Id, conn.RemoteEndPoint, conn.ConnectedAtUtc);
-    conn.Start();
-    LogX.Info($"客户端已连接：{remote}（当前 {_clients.Count}/{max}）");
-    ClientConnected?.Invoke(conn);
     }
 
     private void OnConnectionClosed(TcpClientConnection conn, string reason)
@@ -412,16 +422,23 @@ public sealed class TcpServerService : IAsyncDisposable
     /// <summary>Disconnect a single session, preserving the existing close/history pipeline.</summary>
     public bool DisconnectClient(Guid id)
     {
-        if (!_clients.TryGetValue(id, out var conn)) return false;
-        conn.Kick("服务端手动断开");
-        return true;
+        lock (_admissionGate)
+        {
+            if (!_clients.TryGetValue(id, out var conn)) return false;
+            conn.Kick("服务端手动断开");
+            return true;
+        }
     }
 
     public int DisconnectIp(IPAddress address)
     {
-        var matches = _clients.Values.Where(c => c.RemoteIp.Equals(address)).ToArray();
-        foreach (var conn in matches) conn.Kick("IP 已加入黑名单，服务端主动断开");
-        return matches.Length;
+        lock (_admissionGate)
+        {
+            var matches = _clients.Values.Where(c => c.RemoteIp.Equals(address)).ToArray();
+            foreach (var conn in matches)
+                conn.Kick("IP 已加入黑名单，服务端主动断开");
+            return matches.Length;
+        }
     }
 
     /// <summary>将串口收到的数据广播给所有客户端（多客户端）或发送给唯一客户端（单客户端）。</summary>
