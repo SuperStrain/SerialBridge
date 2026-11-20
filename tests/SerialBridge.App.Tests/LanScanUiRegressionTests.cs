@@ -17,8 +17,11 @@ public sealed class LanScanUiRegressionTests
         var source = Source();
         Assert.Contains("_scanButton = Action(\"扫描局域网\"", source);
         var method = source[source.IndexOf("private async Task ScanAsync()", StringComparison.Ordinal)..];
-        Assert.True(method.IndexOf("if (_isScanning) return;", StringComparison.Ordinal) <
-                    method.IndexOf("await LanDiscoveryScanner.ScanAsync(", StringComparison.Ordinal));
+        var guardIndex = method.IndexOf("if (_isScanning) return;", StringComparison.Ordinal);
+        var scanIndex = method.IndexOf("await LanDiscoveryScanner.ScanDetailedAsync(", StringComparison.Ordinal);
+        Assert.True(guardIndex >= 0, "Missing scan reentrancy guard.");
+        Assert.True(scanIndex >= 0, "Missing detailed discovery scan call.");
+        Assert.True(guardIndex < scanIndex, "Reentrancy guard must run before the scan.");
         Assert.Contains("_scanButton.IsEnabled = false;", method);
         Assert.Contains("_discoveryMode.IsEnabled = false;", method);
     }
@@ -27,8 +30,11 @@ public sealed class LanScanUiRegressionTests
     public void ScanResultsAreReplacedAfterAwaitAndButtonsRestoredInFinally()
     {
         var method = Source().Split("private async Task ScanAsync()")[1];
-        Assert.True(method.IndexOf("await LanDiscoveryScanner.ScanAsync(", StringComparison.Ordinal) <
-                    method.IndexOf("_discoveredList.Children.Clear();", StringComparison.Ordinal));
+        var scanIndex = method.IndexOf("await LanDiscoveryScanner.ScanDetailedAsync(", StringComparison.Ordinal);
+        var clearIndex = method.IndexOf("_discoveredList.Children.Clear();", StringComparison.Ordinal);
+        Assert.True(scanIndex >= 0, "Missing detailed discovery scan call.");
+        Assert.True(clearIndex >= 0, "Missing result-list clear.");
+        Assert.True(scanIndex < clearIndex, "Clear results only after the scan finishes.");
         Assert.Contains("finally", method);
         Assert.Contains("_isScanning = false;", method);
         Assert.Contains("_scanButton.IsEnabled = true;", method);
