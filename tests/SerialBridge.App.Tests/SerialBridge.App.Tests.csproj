@@ -31,6 +31,9 @@
     <Content Include="..\..\src\SerialBridge.App\Views\MainWindow.xaml"
              Link="Fixtures\MainWindow.xaml"
              CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\SerialBridge.App\Views\RemoteConnectionsView.cs"
+             Link="Fixtures\RemoteConnectionsView.cs"
+             CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\src\SerialBridge.App\Assets\app.ico"
              Link="Fixtures\app.ico"
              CopyToOutputDirectory="PreserveNewest" />
