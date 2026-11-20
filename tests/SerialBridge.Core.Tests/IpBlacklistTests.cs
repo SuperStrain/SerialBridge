@@ -158,6 +158,88 @@ public sealed class IpBlacklistTests
     }
 
     [Fact]
+    public async Task ManualKickOnlyClosesSelectedSessionWithCorrectReason()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        var path = Path.Combine(Path.GetTempPath(), "SerialBridge.Tests",
+            Guid.NewGuid().ToString("N"), "history.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await using var history = new ClientHistoryStore(path);
+        var config = new MappingConfig
+        {
+            ListenIp = "127.0.0.1", ListenPort = port,
+            ClientMode = ClientMode.Multi, MaxClients = 3
+        };
+        await using var server = new TcpServerService(config, history);
+        server.Start();
+        using var first = new TcpClient();
+        using var second = new TcpClient();
+        await first.ConnectAsync(IPAddress.Loopback, port);
+        await second.ConnectAsync(IPAddress.Loopback, port);
+        Assert.True(SpinWait.SpinUntil(() => server.ClientCount == 2, TimeSpan.FromSeconds(5)));
+        var target = server.Clients.First().Id;
+        Assert.True(server.DisconnectClient(target));
+        Assert.False(server.DisconnectClient(target));
+        Assert.True(SpinWait.SpinUntil(() => server.ClientCount == 1, TimeSpan.FromSeconds(5)));
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        ClientHistoryEntry? ended = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            ended = (await history.GetHistoryAsync(config.Id)).FirstOrDefault(
+                item => item.DisconnectReason == "服务端手动断开");
+            if (ended is not null) break;
+            await Task.Delay(25);
+        }
+        Assert.NotNull(ended);
+        Assert.Equal(1, server.ClientCount);
+        await server.StopAsync();
+    }
+
+    [Fact]
+    public async Task OneBanKicksAllMappingsSharingTheSameRemoteIp()
+    {
+        var probes = Enumerable.Range(0, 2).Select(_ =>
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            return port;
+        }).ToArray();
+        Assert.NotEqual(probes[0], probes[1]);
+        var blacklist = new IpBlacklistService();
+        await using var first = new TcpServerService(new MappingConfig
+        {
+            ListenIp = "127.0.0.1", ListenPort = probes[0]
+        }, blacklist: blacklist);
+        await using var second = new TcpServerService(new MappingConfig
+        {
+            ListenIp = "127.0.0.1", ListenPort = probes[1]
+        }, blacklist: blacklist);
+        first.Start();
+        second.Start();
+        using var c1 = new TcpClient();
+        using var c2 = new TcpClient();
+        await c1.ConnectAsync(IPAddress.Loopback, probes[0]);
+        await c2.ConnectAsync(IPAddress.Loopback, probes[1]);
+        Assert.True(SpinWait.SpinUntil(
+            () => first.ClientCount == 1 && second.ClientCount == 1,
+            TimeSpan.FromSeconds(5)));
+        var kicked = 0;
+        Assert.True(blacklist.Add("127.0.0.1", "", "测试", _ => { },
+            ip => kicked = first.DisconnectIp(ip) + second.DisconnectIp(ip)));
+        Assert.Equal(2, kicked);
+        Assert.True(SpinWait.SpinUntil(
+            () => first.ClientCount == 0 && second.ClientCount == 0,
+            TimeSpan.FromSeconds(5)));
+        await first.StopAsync();
+        await second.StopAsync();
+    }
+
+    [Fact]
     public async Task BlockingOnlineClientRecordsBlacklistedDisconnect()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0);
