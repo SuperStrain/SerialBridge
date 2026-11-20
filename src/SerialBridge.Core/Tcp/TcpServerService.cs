@@ -344,7 +344,7 @@ public sealed class TcpServerService : IAsyncDisposable
         ClientRejected?.Invoke(remote,
             _config.ClientMode == ClientMode.Single ? "单客户端模式下已有客户端接入" : $"已达到最大客户端数量（{max}）");
         try { tcp.Close(); } catch { }
-        continue;
+        return;
     }
 
     var conn = new TcpClientConnection(tcp);
