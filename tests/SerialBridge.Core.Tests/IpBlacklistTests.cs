@@ -199,6 +199,51 @@ public sealed class IpBlacklistTests
     }
 
     [Fact]
+    public async Task ImmediateManualDisconnectNeverLeavesOpenHistoryRecord()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        var path = Path.Combine(Path.GetTempPath(), "SerialBridge.Tests",
+            Guid.NewGuid().ToString("N"), "history.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await using var history = new ClientHistoryStore(path);
+        var config = new MappingConfig
+        {
+            ListenIp = "127.0.0.1", ListenPort = port,
+            ClientMode = ClientMode.Single
+        };
+        await using var server = new TcpServerService(config, history);
+        server.Start();
+
+        // Repeatedly disconnect as soon as the client becomes visible.
+        // Before the fix, this could queue RecordClosed before RecordConnected.
+        const int attempts = 20;
+        for (var i = 0; i < attempts; i++)
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, port);
+            Assert.True(SpinWait.SpinUntil(() => server.ClientCount == 1,
+                TimeSpan.FromSeconds(5)));
+            var id = server.Clients.Single().Id;
+            Assert.True(server.DisconnectClient(id));
+            Assert.True(SpinWait.SpinUntil(() => server.ClientCount == 0,
+                TimeSpan.FromSeconds(5)));
+        }
+
+        await server.StopAsync();
+        var records = await history.GetHistoryAsync(config.Id);
+        Assert.Equal(attempts, records.Count);
+        Assert.All(records, entry =>
+        {
+            Assert.Equal("服务端手动断开", entry.DisconnectReason);
+            Assert.NotNull(entry.DisconnectedAtUtc);
+            Assert.NotNull(entry.DurationMs);
+        });
+    }
+
+    [Fact]
     public async Task OneBanKicksAllMappingsSharingTheSameRemoteIp()
     {
         var probe1 = new TcpListener(IPAddress.Loopback, 0);
