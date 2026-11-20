@@ -67,7 +67,7 @@ public sealed class MappingRuntime : IAsyncDisposable
         _serial = new SerialPortDevice(factory ?? new SerialPortStreamFactory(),
             new PortParams(config.PortName, config.BaudRate, config.DataBits,
                 config.Parity, config.StopBits, config.FlowControl));
-        _tcp = new TcpServerService(config);
+        _tcp = new TcpServerService(config, blacklist: blacklist);
 
         _serial.DataReceived += OnSerialDataReceived;
         _serial.StateChanged += OnSerialStateChanged;
