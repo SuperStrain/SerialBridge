@@ -118,6 +118,8 @@ public static class AppServices
     {
         lock (_saveGate)
         {
+            if (ConfigStore.LoadFailed)
+                throw new InvalidOperationException("原配置加载失败，禁止修改黑名单以保护配置文件。");
             var prior = Settings.IpBlacklist;
             Settings.IpBlacklist = entries.ToList();
             try { SaveSettings(); }
