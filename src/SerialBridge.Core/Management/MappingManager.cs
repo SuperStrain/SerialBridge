@@ -12,6 +12,11 @@ namespace SerialBridge.Core.Management;
 public sealed class MappingManager : IDisposable
 {
     private readonly object _gate = new();
+    private readonly IpBlacklistService? _blacklist;
+    public MappingManager(IpBlacklistService? blacklist = null) => _blacklist = blacklist;
+
+    public int DisconnectIp(System.Net.IPAddress ip) =>
+        Mappings.Sum(mapping => mapping.Tcp.DisconnectIp(ip));
     private readonly List<MappingRuntime> _mappings = new();
 
     /// <summary>映射列表变化（后台或 UI 线程触发，取决于调用线程）。</summary>
