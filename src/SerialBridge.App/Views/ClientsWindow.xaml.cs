@@ -41,7 +41,11 @@ public partial class ClientsWindow : FluentWindow
     {
         if (!ReferenceEquals(e.Source, ClientTabs)) return;
         if (_viewModel is not null)
+        {
             _viewModel.ShowHistory = ClientTabs.SelectedIndex == 1;
+            _viewModel.ShowBlacklist = ClientTabs.SelectedIndex == 2;
+            if (_viewModel.ShowBlacklist) _viewModel.RefreshBlacklist();
+        }
     }
 
     public ClientsWindow(MappingRuntime runtime)
@@ -150,10 +154,19 @@ public sealed class ClientsViewModel : INotifyPropertyChanged
     public string Title { get; }
     public ObservableCollection<ClientRow> Clients { get; } = new();
     public ObservableCollection<BlockedIpEntry> BlockedIps { get; } = new();
+    public bool ShowBlacklist { get; set; }
     public void RefreshBlacklist()
     {
+        var entries = AppServices.Blacklist.Entries;
+        if (BlockedIps.Count == entries.Count &&
+            BlockedIps.Zip(entries).All(pair =>
+                pair.First.IpAddress == pair.Second.IpAddress &&
+                pair.First.Remark == pair.Second.Remark &&
+                pair.First.Source == pair.Second.Source &&
+                pair.First.AddedAtUtc == pair.Second.AddedAtUtc))
+            return;
         BlockedIps.Clear();
-        foreach (var entry in AppServices.Blacklist.Entries) BlockedIps.Add(entry);
+        foreach (var entry in entries) BlockedIps.Add(entry);
     }
     public bool DisconnectClient(Guid id) => _runtime.Tcp.DisconnectClient(id);
     public void RefreshNow() => Refresh();
@@ -200,7 +213,11 @@ public sealed class ClientsViewModel : INotifyPropertyChanged
         {
             Interval = TimeSpan.FromSeconds(1),
         };
-        _timer.Tick += (_, _) => Refresh();
+        _timer.Tick += (_, _) =>
+        {
+            Refresh();
+            if (ShowBlacklist) RefreshBlacklist();
+        };
         _timer.Start();
         Refresh();
     }
