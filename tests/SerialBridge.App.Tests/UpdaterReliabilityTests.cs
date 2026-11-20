@@ -147,6 +147,140 @@ public sealed class UpdaterReliabilityTests
         }
     }
 
+    [Fact]
+    public async Task CancelDownload_StopsTransferDeletesPartialFileAndReleasesGate()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var directory = Path.Combine(Path.GetTempPath(), "SerialBridge.Tests",
+            Guid.NewGuid().ToString("N"));
+        using var service = new UpdateService(new FakeUpdateEnvironment(), directory);
+        var info = new UpdateInfo("1.4.0",
+            $"http://127.0.0.1:{port}/SerialBridge-Setup-1.4.0-x64.exe", "", false);
+        using var cancel = new CancellationTokenSource();
+        using var retryCancel = new CancellationTokenSource();
+        using var unblock = new CancellationTokenSource();
+        using var retryListener = new TcpListener(IPAddress.Loopback, 0);
+        Task<string?>? download = null;
+        Task<string?>? retryDownload = null;
+        Task? retryServer = null;
+        var bodyReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = Task.Run(async () =>
+        {
+            using var accepted = await listener.AcceptTcpClientAsync(unblock.Token);
+            await using var stream = accepted.GetStream();
+            var last = 0;
+            while (last < 4)
+            {
+                var value = stream.ReadByte();
+                if (value < 0) return;
+                last = (last, value) switch
+                {
+                    (0, '\r') => 1, (1, '\n') => 2,
+                    (2, '\r') => 3, (3, '\n') => 4,
+                    _ => 0
+                };
+            }
+            var header = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 200 OK\r\nContent-Length: 20000000\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(header, unblock.Token);
+            await stream.WriteAsync(new byte[81920], unblock.Token);
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, unblock.Token); }
+            catch (OperationCanceledException) { }
+        });
+
+        try
+        {
+            // Progress is throttled to one event per 100 ms and FileStream
+            // may buffer its first write. Use progress only to establish that
+            // the client has entered body processing; poll the file independently.
+            var progress = new SynchronousProgress(p =>
+            {
+                if (p.ReceivedBytes > 0) bodyReceived.TrySetResult();
+            });
+            download = service.DownloadInstallerAsync(info, progress, cancel.Token);
+            await bodyReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            var written = false;
+            while (DateTime.UtcNow < deadline)
+            {
+                written = Directory.Exists(directory) &&
+                    Directory.GetFiles(directory, "*.downloading")
+                        .Any(file => new FileInfo(file).Length > 0);
+                if (written) break;
+                await Task.Delay(25);
+            }
+            Assert.True(written, "Expected a non-empty .downloading file before cancel.");
+            cancel.Cancel();
+            Assert.Null(await download.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
+
+            // A successful second transfer, not a second null result, proves
+            // that cancellation released the process-wide DownloadGate.
+            const int completeSize = 10 * 1024 * 1024 + 1;
+            retryListener.Start();
+            var retryPort = ((IPEndPoint)retryListener.LocalEndpoint).Port;
+            retryServer = ServeInstallerOnceAsync(retryListener, completeSize);
+            var retryInfo = info with
+            {
+                DownloadUrl = $"http://127.0.0.1:{retryPort}/SerialBridge-Setup-1.4.0-x64.exe"
+            };
+            retryDownload = service.DownloadInstallerAsync(retryInfo, null, retryCancel.Token);
+            var completed = await retryDownload.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.NotNull(completed);
+            Assert.True(File.Exists(completed));
+            Assert.Equal(completeSize, new FileInfo(completed).Length);
+            await retryServer.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
+        }
+        finally
+        {
+            // WaitAsync timeout does not cancel the underlying download.
+            // Stop both clients BEFORE deleting Windows-exclusive temp files.
+            cancel.Cancel();
+            retryCancel.Cancel();
+            unblock.Cancel();
+            listener.Stop();
+            retryListener.Stop();
+            if (download is not null)
+            {
+                try { await download.WaitAsync(TimeSpan.FromSeconds(10)); }
+                catch (Exception) { /* Preserve the original test failure. */ }
+            }
+            if (retryDownload is not null)
+            {
+                try { await retryDownload.WaitAsync(TimeSpan.FromSeconds(10)); }
+                catch (Exception) { /* Preserve the original test failure. */ }
+            }
+            try { await server.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception) { /* Preserve the original test failure. */ }
+            if (retryServer is not null)
+            {
+                try { await retryServer.WaitAsync(TimeSpan.FromSeconds(5)); }
+                catch (Exception) { /* Preserve the original test failure. */ }
+            }
+            // Do not race a still-running task holding FileShare.None.
+            if ((download is null || download.IsCompleted) &&
+                (retryDownload is null || retryDownload.IsCompleted) &&
+                Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void UpdateDialogCloseAlwaysCancelsActiveDownload()
+    {
+        var sourcePath = Path.Combine(AppContext.BaseDirectory,
+            "Fixtures", "UpdatePopupWindow.cs");
+        // The popup is a WPF source fixture; assert that both Cancel and X/Alt+F4
+        // go through window close, and window close cancels the view-model attempt.
+        var source = File.ReadAllText(sourcePath);
+        Assert.Contains("cancelButton.Click += (_, _) => Close();", source);
+        Assert.Contains("Closed += (_, _) =>", source);
+        Assert.Contains("_update.CancelUpdate();", source);
+    }
+
     private static async Task ServeInstallerOnceAsync(TcpListener listener, int payloadSize)
     {
         using var client = await listener.AcceptTcpClientAsync();
@@ -187,6 +321,12 @@ public sealed class UpdaterReliabilityTests
                 first = false;
             }
         }
+    }
+
+    private sealed class SynchronousProgress(Action<DownloadProgress> callback)
+        : IProgress<DownloadProgress>
+    {
+        public void Report(DownloadProgress value) => callback(value);
     }
 
     private sealed class FakeUpdateEnvironment : IUpdateEnvironment

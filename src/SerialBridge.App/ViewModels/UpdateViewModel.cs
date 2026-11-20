@@ -11,6 +11,19 @@ public partial class UpdateViewModel : ObservableObject
 {
     private readonly UpdateService _updater;
     private string? _skippedVersion;
+    private CancellationTokenSource? _downloadCancellation;
+
+    /// <summary>Cancel active download before closing or reopening the update dialog.</summary>
+    public void CancelUpdate()
+    {
+        var current = _downloadCancellation;
+        if (current is null) return;
+        current.Cancel();
+        // Keep Update disabled until the old HTTP/file cleanup releases its gate.
+        PopupStatusText = "正在取消升级下载…";
+        PopupActionVisible = false;
+    }
+
 
     /// <summary>检测到新版本且未被跳过时，主界面标题旁常驻绿色 NEW 徽章。</summary>
     [ObservableProperty] private bool _updateBadgeVisible;
@@ -60,57 +73,79 @@ public partial class UpdateViewModel : ObservableObject
     [RelayCommand]
     public async Task UpdateNowAsync()
     {
-        LogX.Info($"升级点击：触发，缓存信息 {(_cachedInfo is null ? "无" : "v" + _cachedInfo.Version + " " + _cachedInfo.DownloadUrl)}");
-        var info = _cachedInfo;
-        if (info is null)
+        // One attempt per window/view model. A closed dialog can cancel, but
+        // another attempt cannot run until its network/file cleanup has finished.
+        if (_downloadCancellation is not null) return;
+        using var cancellation = new CancellationTokenSource();
+        _downloadCancellation = cancellation;
+        var token = cancellation.Token;
+        PopupActionVisible = false;
+        try
         {
-            // 无缓存（罕见：弹窗未经过检查流程）才回退到在线检查
-            info = await _updater.CheckForUpdateAsync();
+            LogX.Info($"升级点击：触发，缓存信息 {(_cachedInfo is null ? "无" : "v" + _cachedInfo.Version + " " + _cachedInfo.DownloadUrl)}");
+            var info = _cachedInfo;
             if (info is null)
             {
-                PopupStatusText = "检查更新失败，请稍后重试或前往发布页下载。";
+                info = await _updater.CheckForUpdateAsync(token);
+                token.ThrowIfCancellationRequested();
+                if (info is null)
+                {
+                    PopupStatusText = "检查更新失败，请稍后重试或前往发布页下载。";
+                    return;
+                }
+                ShowBadge(info);
+            }
+
+            PopupStatusText = "正在准备升级…";
+            if (info.IsPortableAssetOnly)
+            {
+                token.ThrowIfCancellationRequested();
+                _updater.OpenReleasesPage();
+                PopupStatusText = "绿色版请从发布页手动下载新版本。";
                 return;
             }
-            ShowBadge(info);
+
+            // Progress<T> posts callbacks asynchronously to the UI dispatcher.
+            // Ignore any pending callbacks after CancelUpdate / completion.
+            var progress = new Progress<DownloadProgress>(p =>
+            {
+                if (token.IsCancellationRequested ||
+                    !ReferenceEquals(_downloadCancellation, cancellation)) return;
+                PopupStatusText = p.TotalBytes is null
+                    ? $"正在下载 v{info.Version}… {p.Percent}%"
+                    : $"正在下载 v{info.Version}… {p.Percent}%（{p.ReceivedBytes / 1048576.0:F1} / {p.TotalBytes / 1048576.0:F1} MB）";
+            });
+
+            PopupStatusText = $"正在下载 v{info.Version}… 0%";
+            var setupPath = await _updater.DownloadInstallerAsync(info, progress, token);
+            token.ThrowIfCancellationRequested();
+            if (setupPath is null)
+            {
+                PopupStatusText = "升级下载失败，可前往发布页手动下载，或稍后重试。";
+                return;
+            }
+
+            PopupStatusText = "下载完成，即将安装并重启…";
+            await Task.Delay(800, token); // 让用户看到状态，同时允许取消安装接力
+            token.ThrowIfCancellationRequested();
+            if (!_updater.LaunchSilentSetup(setupPath))
+            {
+                PopupStatusText = $"升级程序启动失败，请手动运行：{setupPath}";
+                return;
+            }
+            // Setup 会关闭本程序并自动重启。
         }
-
-        PopupStatusText = "正在准备升级…";
-        PopupActionVisible = false;
-
-        if (info.IsPortableAssetOnly)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            _updater.OpenReleasesPage();
-            PopupStatusText = "绿色版请从发布页手动下载新版本。";
+            PopupStatusText = "已取消升级下载。";
+            LogX.Info("用户取消升级下载");
+        }
+        finally
+        {
+            if (ReferenceEquals(_downloadCancellation, cancellation))
+                _downloadCancellation = null;
             PopupActionVisible = true;
-            return;
         }
-
-        var progress = new Progress<DownloadProgress>(p =>
-        {
-            PopupStatusText = p.TotalBytes is null
-                ? $"正在下载 v{info.Version}… {p.Percent}%"
-                : $"正在下载 v{info.Version}… {p.Percent}%（{p.ReceivedBytes / 1048576.0:F1} / {p.TotalBytes / 1048576.0:F1} MB）";
-        });
-
-        PopupStatusText = $"正在下载 v{info.Version}… 0%";
-        var setupPath = await _updater.DownloadInstallerAsync(info, progress);
-        if (setupPath is null)
-        {
-            PopupStatusText = "升级下载失败，可前往发布页手动下载，或稍后重试。";
-            PopupActionVisible = true;
-            return;
-        }
-
-        PopupStatusText = "下载完成，即将安装并重启…";
-        await Task.Delay(800);   // 让用户看到状态
-
-        if (!_updater.LaunchSilentSetup(setupPath))
-        {
-            PopupStatusText = $"升级程序启动失败，请手动运行：{setupPath}";
-            PopupActionVisible = true;
-            return;
-        }
-        // Setup 会关闭本程序并自动重启——此处无需退出动作
     }
 
     public void SkipVersion()

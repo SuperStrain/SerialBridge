@@ -109,7 +109,13 @@ public sealed class UpdatePopupWindow : Wpf.Ui.Controls.FluentWindow
         root.Children.Add(_notesHost);
         RenderNotes();
         _update.PropertyChanged += OnUpdatePropertyChanged;
-        Closed += (_, _) => _update.PropertyChanged -= OnUpdatePropertyChanged;
+        // Closing via Cancel, titlebar X, Alt+F4 or owner shutdown all aborts the download.
+        // Do this before unsubscribing; reopening must not inherit a running transfer.
+        Closed += (_, _) =>
+        {
+            _update.CancelUpdate();
+            _update.PropertyChanged -= OnUpdatePropertyChanged;
+        };
     }
 
     private void RenderNotes()
