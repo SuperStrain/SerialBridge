@@ -209,6 +209,24 @@ public static class LanDiscoveryScanner
         return result;
     }
 
+    /// <summary>Pure destination builder, shared by runtime and regression tests.</summary>
+    public static IReadOnlyList<IPAddress> GetProbeDestinations(
+        string? targetSubnet, IPAddress? targetHost, IEnumerable<IPAddress> localBroadcasts)
+    {
+        if (targetHost is not null && !string.IsNullOrWhiteSpace(targetSubnet))
+            throw new ArgumentException("不能同时指定单个目标 IP 和目标网段。");
+        if (targetHost is not null &&
+            (targetHost.AddressFamily != AddressFamily.InterNetwork ||
+             IPAddress.IsLoopback(targetHost) ||
+             targetHost.Equals(IPAddress.Any) || targetHost.Equals(IPAddress.Broadcast) ||
+             targetHost.GetAddressBytes()[0] is 0 or >= 224))
+            throw new ArgumentException("目标 IP 必须是有效的远程 IPv4 单播地址。", nameof(targetHost));
+        if (!string.IsNullOrWhiteSpace(targetSubnet))
+            return ExpandCidr(targetSubnet);
+        if (targetHost is not null) return [targetHost];
+        return new[] { IPAddress.Broadcast }.Concat(localBroadcasts).Distinct().ToArray();
+    }
+
     /// <summary>
     /// Broadcast on local IPv4 interfaces. Optionally query a known host by
     /// unicast UDP when routers do not forward broadcasts across subnets.
@@ -258,23 +276,9 @@ public static class LanDiscoveryScanner
         {
             Magic = LanDiscoveryProtocol.Magic, Type = "discover", RequestId = requestId,
         });
-        var destinations = new HashSet<IPAddress>();
-        if (allowedResponders is not null)
+        var localBroadcasts = new List<IPAddress>();
+        if (allowedResponders is null)
         {
-            // Explicit target mode must never send local/global broadcast.
-            if (targetHost is not null)
-            {
-                if (targetHost.AddressFamily != AddressFamily.InterNetwork ||
-                    IPAddress.IsLoopback(targetHost) ||
-                    targetHost.Equals(IPAddress.Any) || targetHost.Equals(IPAddress.Broadcast))
-                    throw new ArgumentException("目标 IP 必须是有效的远程 IPv4 单播地址。", nameof(targetHost));
-                destinations.Add(targetHost);
-            }
-            foreach (var address in subnetHosts) destinations.Add(address);
-        }
-        else
-        {
-            destinations.Add(IPAddress.Broadcast);
             foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up ||
@@ -286,11 +290,12 @@ public static class LanDiscoveryScanner
                         unicast.IPv4Mask is not { } mask) continue;
                     var ip = unicast.Address.GetAddressBytes();
                     var m = mask.GetAddressBytes();
-                    destinations.Add(new IPAddress(Enumerable.Range(0, 4)
+                    localBroadcasts.Add(new IPAddress(Enumerable.Range(0, 4)
                         .Select(i => (byte)(ip[i] | ~m[i])).ToArray()));
                 }
             }
         }
+        var destinations = GetProbeDestinations(targetSubnet, targetHost, localBroadcasts);
 
         var found = new Dictionary<Guid, DiscoveredDevice>();
         var respondingIds = new HashSet<Guid>();
