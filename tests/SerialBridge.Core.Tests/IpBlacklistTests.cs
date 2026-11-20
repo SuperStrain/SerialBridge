@@ -201,15 +201,17 @@ public sealed class IpBlacklistTests
     [Fact]
     public async Task OneBanKicksAllMappingsSharingTheSameRemoteIp()
     {
-        var probes = Enumerable.Range(0, 2).Select(_ =>
+        var probe1 = new TcpListener(IPAddress.Loopback, 0);
+        var probe2 = new TcpListener(IPAddress.Loopback, 0);
+        probe1.Start();
+        probe2.Start();
+        var probes = new[]
         {
-            var listener = new TcpListener(IPAddress.Loopback, 0);
-            listener.Start();
-            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            listener.Stop();
-            return port;
-        }).ToArray();
-        Assert.NotEqual(probes[0], probes[1]);
+            ((IPEndPoint)probe1.LocalEndpoint).Port,
+            ((IPEndPoint)probe2.LocalEndpoint).Port
+        };
+        probe1.Stop();
+        probe2.Stop();
         var blacklist = new IpBlacklistService();
         await using var first = new TcpServerService(new MappingConfig
         {
