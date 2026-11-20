@@ -158,8 +158,14 @@ public sealed class UpdaterReliabilityTests
         using var service = new UpdateService(new FakeUpdateEnvironment(), directory);
         var info = new UpdateInfo("1.4.0",
             $"http://127.0.0.1:{port}/SerialBridge-Setup-1.4.0-x64.exe", "", false);
-        var bodyWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancel = new CancellationTokenSource();
+        using var retryCancel = new CancellationTokenSource();
         using var unblock = new CancellationTokenSource();
+        using var retryListener = new TcpListener(IPAddress.Loopback, 0);
+        Task<string?>? download = null;
+        Task<string?>? retryDownload = null;
+        Task? retryServer = null;
+        var bodyReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = Task.Run(async () =>
         {
             using var accepted = await listener.AcceptTcpClientAsync(unblock.Token);
@@ -186,55 +192,79 @@ public sealed class UpdaterReliabilityTests
 
         try
         {
-            using var cancel = new CancellationTokenSource();
-            // Progress is reported only after the client has written response body
-            // bytes into its .downloading file. Do not cancel merely when the
-            // server sends bytes: the client may not even have opened its file.
+            // Progress is throttled to one event per 100 ms and FileStream
+            // may buffer its first write. Use progress only to establish that
+            // the client has entered body processing; poll the file independently.
             var progress = new SynchronousProgress(p =>
             {
-                if (p.ReceivedBytes <= 0 || !Directory.Exists(directory)) return;
-                if (Directory.GetFiles(directory, "*.downloading")
-                    .Any(file => new FileInfo(file).Length > 0))
-                    bodyWritten.TrySetResult();
+                if (p.ReceivedBytes > 0) bodyReceived.TrySetResult();
             });
-            var download = service.DownloadInstallerAsync(info, progress, cancel.Token);
-            await bodyWritten.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.NotEmpty(Directory.GetFiles(directory, "*.downloading"));
+            download = service.DownloadInstallerAsync(info, progress, cancel.Token);
+            await bodyReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            var written = false;
+            while (DateTime.UtcNow < deadline)
+            {
+                written = Directory.Exists(directory) &&
+                    Directory.GetFiles(directory, "*.downloading")
+                        .Any(file => new FileInfo(file).Length > 0);
+                if (written) break;
+                await Task.Delay(25);
+            }
+            Assert.True(written, "Expected a non-empty .downloading file before cancel.");
             cancel.Cancel();
             Assert.Null(await download.WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
 
-            // A new *successful* download proves the shared gate was released.
-            // Another canceled request returning null would not: both busy-gate
-            // and cancellation paths return the same result.
+            // A successful second transfer, not a second null result, proves
+            // that cancellation released the process-wide DownloadGate.
             const int completeSize = 10 * 1024 * 1024 + 1;
-            using var retryListener = new TcpListener(IPAddress.Loopback, 0);
             retryListener.Start();
             var retryPort = ((IPEndPoint)retryListener.LocalEndpoint).Port;
-            var retryServer = ServeInstallerOnceAsync(retryListener, completeSize);
+            retryServer = ServeInstallerOnceAsync(retryListener, completeSize);
             var retryInfo = info with
             {
                 DownloadUrl = $"http://127.0.0.1:{retryPort}/SerialBridge-Setup-1.4.0-x64.exe"
             };
-            try
-            {
-                var completed = await service.DownloadInstallerAsync(
-                    retryInfo, null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15));
-                Assert.NotNull(completed);
-                Assert.True(File.Exists(completed));
-                Assert.Equal(completeSize, new FileInfo(completed).Length);
-                await retryServer.WaitAsync(TimeSpan.FromSeconds(10));
-            }
-            finally { retryListener.Stop(); }
+            retryDownload = service.DownloadInstallerAsync(retryInfo, null, retryCancel.Token);
+            var completed = await retryDownload.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.NotNull(completed);
+            Assert.True(File.Exists(completed));
+            Assert.Equal(completeSize, new FileInfo(completed).Length);
+            await retryServer.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
         }
         finally
         {
+            // WaitAsync timeout does not cancel the underlying download.
+            // Stop both clients BEFORE deleting Windows-exclusive temp files.
+            cancel.Cancel();
+            retryCancel.Cancel();
             unblock.Cancel();
             listener.Stop();
+            retryListener.Stop();
+            if (download is not null)
+            {
+                try { await download.WaitAsync(TimeSpan.FromSeconds(10)); }
+                catch (Exception) { /* Preserve the original test failure. */ }
+            }
+            if (retryDownload is not null)
+            {
+                try { await retryDownload.WaitAsync(TimeSpan.FromSeconds(10)); }
+                catch (Exception) { /* Preserve the original test failure. */ }
+            }
             try { await server.WaitAsync(TimeSpan.FromSeconds(5)); }
-            catch (OperationCanceledException) { }
-            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            catch (Exception) { /* Preserve the original test failure. */ }
+            if (retryServer is not null)
+            {
+                try { await retryServer.WaitAsync(TimeSpan.FromSeconds(5)); }
+                catch (Exception) { /* Preserve the original test failure. */ }
+            }
+            // Do not race a still-running task holding FileShare.None.
+            if ((download is null || download.IsCompleted) &&
+                (retryDownload is null || retryDownload.IsCompleted) &&
+                Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
         }
     }
 
