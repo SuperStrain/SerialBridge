@@ -27,6 +27,15 @@ public sealed class GeneralSettings
     public bool AllowLanDiscovery { get; set; }
 }
 
+/// <summary>A globally blocked remote IPv4 host.</summary>
+public sealed class BlockedIpEntry
+{
+    public string IpAddress { get; set; } = "";
+    public string Remark { get; set; } = "";
+    public DateTime AddedAtUtc { get; set; }
+    public string Source { get; set; } = "";
+}
+
 /// <summary>整个应用的持久化根对象。</summary>
 public sealed class AppSettings
 {
@@ -41,6 +50,8 @@ public sealed class AppSettings
     public Guid DiscoveryDeviceId { get; set; } = Guid.NewGuid();
 
     public GeneralSettings General { get; set; } = new();
+
+    public List<BlockedIpEntry> IpBlacklist { get; set; } = new();
 
     /// <summary>Shared, user-defined serial command shortcuts and macros.</summary>
     public List<CommandPreset> CommandPresets { get; set; } = new();

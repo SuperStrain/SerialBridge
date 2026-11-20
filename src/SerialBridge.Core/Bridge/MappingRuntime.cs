@@ -60,13 +60,14 @@ public sealed class MappingRuntime : IAsyncDisposable
     /// <summary>数据监控事件（后台线程触发；payload 为只读副本）。</summary>
     public event Action<MonitorEntry>? DataTransferred;
 
-    public MappingRuntime(MappingConfig config, IPortStreamFactory? factory = null)
+    public MappingRuntime(MappingConfig config, IPortStreamFactory? factory = null,
+        SerialBridge.Core.Management.IpBlacklistService? blacklist = null)
     {
         Config = config;
         _serial = new SerialPortDevice(factory ?? new SerialPortStreamFactory(),
             new PortParams(config.PortName, config.BaudRate, config.DataBits,
                 config.Parity, config.StopBits, config.FlowControl));
-        _tcp = new TcpServerService(config);
+        _tcp = new TcpServerService(config, blacklist: blacklist);
 
         _serial.DataReceived += OnSerialDataReceived;
         _serial.StateChanged += OnSerialStateChanged;

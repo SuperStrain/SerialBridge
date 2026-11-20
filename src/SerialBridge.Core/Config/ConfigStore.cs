@@ -88,6 +88,19 @@ public sealed class ConfigStore
     {
         s.General ??= new GeneralSettings();
         s.General.LogRetentionDays = Math.Clamp(s.General.LogRetentionDays, 1, 365);
+        s.IpBlacklist ??= new List<BlockedIpEntry>();
+        var blacklistSeen = new HashSet<string>(StringComparer.Ordinal);
+        s.IpBlacklist = s.IpBlacklist.Where(entry => entry is not null &&
+            SerialBridge.Core.Management.IpBlacklistService.TryNormalize(entry.IpAddress, out _) )
+            .Select(entry =>
+            {
+                SerialBridge.Core.Management.IpBlacklistService.TryNormalize(entry.IpAddress, out var ip);
+                entry.IpAddress = ip;
+                entry.Remark = (entry.Remark ?? "").Trim();
+                entry.Source ??= "";
+                return entry;
+            })
+            .Where(entry => blacklistSeen.Add(entry.IpAddress)).Take(1000).ToList();
         s.CommandPresets ??= new List<CommandPreset>();
         s.CommandPresets = s.CommandPresets.Where(p => p is not null).Take(200).ToList();
         foreach (var p in s.CommandPresets)

@@ -54,6 +54,18 @@
                                 <GridViewColumn Header="已连接时长" Width="105" DisplayMemberBinding="{Binding DurationText}" />
                                 <GridViewColumn Header="发送（设备→客户端）" Width="145" DisplayMemberBinding="{Binding SentText}" />
                                 <GridViewColumn Header="接收（客户端→设备）" Width="145" DisplayMemberBinding="{Binding RecvText}" />
+                                <GridViewColumn Header="操作" Width="180">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Content="断开" Padding="7,2" Margin="0,0,5,0"
+                                                        Click="OnDisconnectClient" />
+                                                <Button Content="加入黑名单" Padding="7,2"
+                                                        Click="OnBlockCurrent" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
                             </GridView>
                         </ListView.View>
                     </ListView>
@@ -94,6 +106,42 @@
                     </ListView>
                 </DockPanel>
             </TabItem>
+            <TabItem Header="黑名单管理">
+                <DockPanel Margin="6">
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,2,0,8">
+                        <TextBox x:Name="BlockIpInput" Width="170" Margin="0,0,8,0"
+                                 ToolTip="输入单个 IPv4，例如 172.20.8.48" />
+                        <TextBox x:Name="BlockRemarkInput" Width="220" Margin="0,0,8,0"
+                                 ToolTip="可选备注或封禁原因" />
+                        <Button Content="添加 IP" Padding="10,4" Click="OnAddBlockedIp" />
+                        <TextBlock Text="全局生效（所有映射）" Margin="12,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <ListView ItemsSource="{Binding BlockedIps}" BorderThickness="0"
+                              VirtualizingPanel.IsVirtualizing="True">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="IP 地址" Width="150" DisplayMemberBinding="{Binding IpAddress}" />
+                                <GridViewColumn Header="备注" Width="160" DisplayMemberBinding="{Binding Remark}" />
+                                <GridViewColumn Header="添加时间（UTC）" Width="160" DisplayMemberBinding="{Binding AddedAtUtc}" />
+                                <GridViewColumn Header="来源" Width="120" DisplayMemberBinding="{Binding Source}" />
+                                <GridViewColumn Header="操作" Width="140">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Content="备注" Padding="5,2" Margin="0,0,5,0"
+                                                        Click="OnEditBlockedRemark" />
+                                                <Button Content="移除" Padding="5,2" Click="OnRemoveBlockedIp" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </DockPanel>
+            </TabItem>
         </TabControl>
 
         <!-- 底部说明 -->
@@ -103,7 +151,7 @@
                 BorderThickness="1" CornerRadius="8">
             <TextBlock FontSize="12" TextWrapping="Wrap"
                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                       Text="“已发送”为设备→客户端，“已接收”为客户端→设备。历史数据持久化到 SQLite，每条映射保留最近 1000 条已结束会话；删除映射时同时删除其历史。被拒绝的连接不计入历史与累计接入。" />
+                       Text="“已发送”为设备→客户端，“已接收”为客户端→设备。历史数据持久化到 SQLite，每条映射保留最近 1000 条已结束会话；删除映射时同时删除其历史。被拒绝的连接不计入累计接入，但会记录在历史中。全局 IP 黑名单对所有映射生效。" />
         </Border>
     </Grid>
 </ui:FluentWindow>
