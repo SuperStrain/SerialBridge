@@ -31,6 +31,7 @@ public static class AppServices
     public static AppSettings Settings { get; private set; } = new();
     public static ConfigStore ConfigStore { get; private set; } = new();
     public static MappingManager Manager { get; private set; } = new();
+    public static IpBlacklistService Blacklist { get; private set; } = new();
     public static RemoteConnectionManager Remotes { get; private set; } = new();
     public static LanDiscoveryResponder? Discovery { get; private set; }
 
@@ -51,7 +52,8 @@ public static class AppServices
         }
         ConfigStore = new ConfigStore();
         Settings = ConfigStore.Load();
-        Manager = new MappingManager();
+        Blacklist = new IpBlacklistService(Settings.IpBlacklist);
+        Manager = new MappingManager(Blacklist);
         Remotes = new RemoteConnectionManager();
         Discovery = new LanDiscoveryResponder(() => Manager.Mappings
             .Where(m => m.Tcp.IsListening).Select(m => m.Config).ToArray(), Settings.DiscoveryDeviceId);
@@ -111,6 +113,25 @@ public static class AppServices
 
     public static Task SetLanDiscoveryEnabledAsync(bool enabled) =>
         _discoverySwitch?.SetEnabledAsync(enabled) ?? Task.CompletedTask;
+
+    private static void PersistBlacklist(IReadOnlyList<BlockedIpEntry> entries)
+    {
+        lock (_saveGate)
+        {
+            var prior = Settings.IpBlacklist;
+            Settings.IpBlacklist = entries.ToList();
+            try { SaveSettings(); }
+            catch { Settings.IpBlacklist = prior; throw; }
+        }
+    }
+
+    public static bool BlockIp(string ip, string remark, string source) =>
+        Blacklist.Add(ip, remark, source, PersistBlacklist, Manager.DisconnectIp);
+
+    public static bool UnblockIp(string ip) => Blacklist.Remove(ip, PersistBlacklist);
+
+    public static bool UpdateBlockedIpRemark(string ip, string remark) =>
+        Blacklist.UpdateRemark(ip, remark, PersistBlacklist);
 
     /// <summary>保存全部配置（映射列表 + 偏好）。</summary>
     public static void SaveSettings()
