@@ -171,13 +171,13 @@ public sealed class UpdaterReliabilityTests
                 if (value < 0) return;
                 last = (last, value) switch
                 {
-                    (0, '\\r') => 1, (1, '\\n') => 2,
-                    (2, '\\r') => 3, (3, '\\n') => 4,
+                    (0, '\r') => 1, (1, '\n') => 2,
+                    (2, '\r') => 3, (3, '\n') => 4,
                     _ => 0
                 };
             }
             var header = Encoding.ASCII.GetBytes(
-                "HTTP/1.1 200 OK\\r\\nContent-Length: 20000000\\r\\nConnection: close\\r\\n\\r\\n");
+                "HTTP/1.1 200 OK\r\nContent-Length: 20000000\r\nConnection: close\r\n\r\n");
             await stream.WriteAsync(header, unblock.Token);
             await stream.WriteAsync(new byte[81920], unblock.Token);
             responseSent.TrySetResult();
