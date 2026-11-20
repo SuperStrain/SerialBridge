@@ -70,7 +70,7 @@ public sealed class MappingManager : IDisposable
 
     public MappingRuntime CreateMapping(MappingConfig config)
     {
-        var rt = new MappingRuntime(config);
+        var rt = new MappingRuntime(config, blacklist: _blacklist);
         lock (_gate) _mappings.Add(rt);
         LogX.Info($"已创建映射「{config.Name}」：{config.PortName} ↔ {config.ListenIp}:{config.ListenPort}");
         MappingsChanged?.Invoke();
