@@ -67,6 +67,57 @@ public sealed class IpBlacklistTests
     }
 
     [Fact]
+    public void BlacklistSurvivesConfigSaveAndLoad()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "SerialBridge.Tests",
+            Guid.NewGuid().ToString("N"), "config.json");
+        var store = new SerialBridge.Core.Config.ConfigStore(path);
+        var config = new AppSettings();
+        config.IpBlacklist.Add(new BlockedIpEntry
+        {
+            IpAddress = "172.20.8.48", Remark = "阻止测试客户端",
+            AddedAtUtc = DateTime.UtcNow, Source = "手动添加"
+        });
+        store.Save(config);
+        var loaded = new SerialBridge.Core.Config.ConfigStore(path).Load();
+        Assert.Single(loaded.IpBlacklist);
+        Assert.Equal("172.20.8.48", loaded.IpBlacklist[0].IpAddress);
+        Assert.Equal("阻止测试客户端", loaded.IpBlacklist[0].Remark);
+        Assert.True(new IpBlacklistService(loaded.IpBlacklist)
+            .IsBlocked(IPAddress.Parse("172.20.8.48")));
+    }
+
+    [Fact]
+    public async Task AdmissionAndBlockingSerializeWithoutLeakingNewConnection()
+    {
+        var service = new IpBlacklistService();
+        var ip = IPAddress.Parse("192.0.2.99");
+        using var admitted = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var accept = Task.Run(() => service.TryAdmit(ip, () =>
+        {
+            admitted.Set();
+            release.Wait(TimeSpan.FromSeconds(5));
+        }));
+        Assert.True(admitted.Wait(TimeSpan.FromSeconds(5)));
+        var kickCount = 0;
+        var ban = Task.Run(() => service.Add(ip.ToString(), "", "", _ => { }, _ =>
+        {
+            Interlocked.Increment(ref kickCount);
+            return 1;
+        }));
+        try
+        {
+            Assert.False(ban.IsCompleted);
+        }
+        finally { release.Set(); }
+        Assert.True(await accept);
+        Assert.True(await ban);
+        Assert.Equal(1, kickCount);
+        Assert.False(service.TryAdmit(ip, () => throw new Exception("leaked")));
+    }
+
+    [Fact]
     public async Task BlacklistedLoopbackIsRejectedBeforeClientLimitWithHistory()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0);
