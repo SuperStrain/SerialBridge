@@ -34,7 +34,7 @@ public sealed class IpBlacklistService
         if (!IPAddress.TryParse(input?.Trim(), out var parsed) ||
             parsed.AddressFamily != AddressFamily.InterNetwork ||
             parsed.Equals(IPAddress.Any) || parsed.Equals(IPAddress.Broadcast) ||
-            IPAddress.IsLoopback(parsed) || parsed.IsIPv6Multicast)
+            parsed.GetAddressBytes()[0] >= 224)
             return false;
         // Require four dotted decimal components, not IPAddress.Parse's
         // abbreviated / integer representations.
