@@ -67,7 +67,7 @@ public partial class ClientsWindow : FluentWindow
         if ((sender as System.Windows.Controls.Button)?.DataContext is not ClientRow row) return;
         var ip = row.RemoteIp;
         if (MessageBox.Show(this,
-            $"将 {ip} 加入全局黑名单？本机所有映射中来自此 IP 的连接都会立即断开，之后的连接也将被拒绝。\\n共享该出口 IP 的其他设备也会受到影响。",
+            $"将 {ip} 加入全局黑名单？本机所有映射中来自此 IP 的连接都会立即断开，之后的连接也将被拒绝。\n共享该出口 IP 的其他设备也会受到影响。",
             "确认加入黑名单", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         ApplyBlock(ip, "在线连接加入");
     }
