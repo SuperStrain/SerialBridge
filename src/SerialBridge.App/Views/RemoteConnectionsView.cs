@@ -14,6 +14,8 @@ public sealed class RemoteConnectionsView : UserControl
 {
     private readonly StackPanel _savedList = new();
     private readonly StackPanel _discoveredList = new();
+    private readonly Button _scanButton;
+    private bool _isScanning;
     private readonly ComboBox _discoveryMode = new()
     {
         Width = 125,
@@ -74,7 +76,8 @@ public sealed class RemoteConnectionsView : UserControl
             Margin = new Thickness(0, 0, 0, 10)
         });
         var discoveryControls = new StackPanel { Orientation = Orientation.Horizontal };
-        discoveryControls.Children.Add(Action("扫描局域网", async () => await ScanAsync()));
+        _scanButton = Action("扫描局域网", async () => await ScanAsync());
+        discoveryControls.Children.Add(_scanButton);
         discoveryControls.Children.Add(_discoveryMode);
         discoveryControls.Children.Add(new TextBlock
         {
@@ -315,6 +318,11 @@ public sealed class RemoteConnectionsView : UserControl
 
     private async Task ScanAsync()
     {
+        // UI clicks are dispatched serially, but an async scan yields while
+        // waiting for UDP replies. Prevent any second scan from updating
+        // the same results panel before the first has finished.
+        if (_isScanning) return;
+
         string? subnet = null;
         if (_discoveryMode.SelectedIndex == 1)
         {
@@ -326,12 +334,19 @@ public sealed class RemoteConnectionsView : UserControl
                 return;
             }
         }
+        _isScanning = true;
+        _scanButton.IsEnabled = false;
+        _scanButton.Content = "扫描中…";
+        _discoveryMode.IsEnabled = false;
+        _discoveryTarget.IsEnabled = false;
         _status.Text = "正在扫描局域网（约 3 秒）…";
-        _discoveredList.Children.Clear();
         try
         {
             var devices = await LanDiscoveryScanner.ScanAsync(TimeSpan.FromSeconds(3),
                 targetSubnet: subnet);
+            // Only the completed scan replaces the previous results. Do not
+            // append responses to a list still owned by another run.
+            _discoveredList.Children.Clear();
             _status.Text = devices.Count == 0
                 ? "未发现设备。请确认对方允许被发现、映射正在监听且防火墙未拦截 UDP 39001。"
                 : $"发现 {devices.Count} 台设备。";
@@ -383,5 +398,13 @@ public sealed class RemoteConnectionsView : UserControl
             }
         }
         catch (Exception ex) { _status.Text = "扫描失败：" + ex.Message; }
+        finally
+        {
+            _isScanning = false;
+            _scanButton.Content = "扫描局域网";
+            _scanButton.IsEnabled = true;
+            _discoveryMode.IsEnabled = true;
+            _discoveryTarget.IsEnabled = _discoveryMode.SelectedIndex == 1;
+        }
     }
 }
