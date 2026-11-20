@@ -158,7 +158,7 @@ public sealed class UpdaterReliabilityTests
         using var service = new UpdateService(new FakeUpdateEnvironment(), directory);
         var info = new UpdateInfo("1.4.0",
             $"http://127.0.0.1:{port}/SerialBridge-Setup-1.4.0-x64.exe", "", false);
-        var responseSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bodyWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var unblock = new CancellationTokenSource();
         var server = Task.Run(async () =>
         {
@@ -180,7 +180,6 @@ public sealed class UpdaterReliabilityTests
                 "HTTP/1.1 200 OK\r\nContent-Length: 20000000\r\nConnection: close\r\n\r\n");
             await stream.WriteAsync(header, unblock.Token);
             await stream.WriteAsync(new byte[81920], unblock.Token);
-            responseSent.TrySetResult();
             try { await Task.Delay(Timeout.InfiniteTimeSpan, unblock.Token); }
             catch (OperationCanceledException) { }
         });
@@ -188,16 +187,45 @@ public sealed class UpdaterReliabilityTests
         try
         {
             using var cancel = new CancellationTokenSource();
-            var download = service.DownloadInstallerAsync(info, null, cancel.Token);
-            await responseSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // Progress is reported only after the client has written response body
+            // bytes into its .downloading file. Do not cancel merely when the
+            // server sends bytes: the client may not even have opened its file.
+            var progress = new SynchronousProgress(p =>
+            {
+                if (p.ReceivedBytes <= 0 || !Directory.Exists(directory)) return;
+                if (Directory.GetFiles(directory, "*.downloading")
+                    .Any(file => new FileInfo(file).Length > 0))
+                    bodyWritten.TrySetResult();
+            });
+            var download = service.DownloadInstallerAsync(info, progress, cancel.Token);
+            await bodyWritten.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.NotEmpty(Directory.GetFiles(directory, "*.downloading"));
             cancel.Cancel();
-            Assert.Null(await download.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Null(await download.WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
-            // The process-level gate must be released after cancellation.
-            using var alreadyCanceled = new CancellationTokenSource();
-            alreadyCanceled.Cancel();
-            Assert.Null(await service.DownloadInstallerAsync(
-                info, null, alreadyCanceled.Token).WaitAsync(TimeSpan.FromSeconds(5)));
+
+            // A new *successful* download proves the shared gate was released.
+            // Another canceled request returning null would not: both busy-gate
+            // and cancellation paths return the same result.
+            const int completeSize = 10 * 1024 * 1024 + 1;
+            using var retryListener = new TcpListener(IPAddress.Loopback, 0);
+            retryListener.Start();
+            var retryPort = ((IPEndPoint)retryListener.LocalEndpoint).Port;
+            var retryServer = ServeInstallerOnceAsync(retryListener, completeSize);
+            var retryInfo = info with
+            {
+                DownloadUrl = $"http://127.0.0.1:{retryPort}/SerialBridge-Setup-1.4.0-x64.exe"
+            };
+            try
+            {
+                var completed = await service.DownloadInstallerAsync(
+                    retryInfo, null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.NotNull(completed);
+                Assert.True(File.Exists(completed));
+                Assert.Equal(completeSize, new FileInfo(completed).Length);
+                await retryServer.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally { retryListener.Stop(); }
             Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
         }
         finally
@@ -263,6 +291,12 @@ public sealed class UpdaterReliabilityTests
                 first = false;
             }
         }
+    }
+
+    private sealed class SynchronousProgress(Action<DownloadProgress> callback)
+        : IProgress<DownloadProgress>
+    {
+        public void Report(DownloadProgress value) => callback(value);
     }
 
     private sealed class FakeUpdateEnvironment : IUpdateEnvironment
