@@ -127,13 +127,26 @@ public static class AppServices
         }
     }
 
-    public static bool BlockIp(string ip, string remark, string source) =>
-        Blacklist.Add(ip, remark, source, PersistBlacklist, Manager.DisconnectIp);
+    public static bool BlockIp(string ip, string remark, string source)
+    {
+        var added = Blacklist.Add(ip, remark, source, PersistBlacklist, Manager.DisconnectIp);
+        if (added) LogX.Warn($"已加入全局 IP 黑名单：{ip}（来源：{source}）");
+        return added;
+    }
 
-    public static bool UnblockIp(string ip) => Blacklist.Remove(ip, PersistBlacklist);
+    public static bool UnblockIp(string ip)
+    {
+        var removed = Blacklist.Remove(ip, PersistBlacklist);
+        if (removed) LogX.Info($"已从全局 IP 黑名单移除：{ip}");
+        return removed;
+    }
 
-    public static bool UpdateBlockedIpRemark(string ip, string remark) =>
-        Blacklist.UpdateRemark(ip, remark, PersistBlacklist);
+    public static bool UpdateBlockedIpRemark(string ip, string remark)
+    {
+        var updated = Blacklist.UpdateRemark(ip, remark, PersistBlacklist);
+        if (updated) LogX.Info($"已更新黑名单备注：{ip}");
+        return updated;
+    }
 
     /// <summary>保存全部配置（映射列表 + 偏好）。</summary>
     public static void SaveSettings()
