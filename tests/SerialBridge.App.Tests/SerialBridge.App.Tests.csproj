@@ -28,6 +28,9 @@
     <Content Include="..\..\src\SerialBridge.App\Views\TerminalWindow.xaml"
              Link="Fixtures\TerminalWindow.xaml"
              CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\SerialBridge.App\Views\ClientsWindow.xaml"
+             Link="Fixtures\ClientsWindow.xaml"
+             CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\src\SerialBridge.App\Views\MainWindow.xaml"
              Link="Fixtures\MainWindow.xaml"
              CopyToOutputDirectory="PreserveNewest" />
