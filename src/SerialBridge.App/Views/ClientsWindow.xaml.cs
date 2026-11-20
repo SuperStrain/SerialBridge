@@ -78,7 +78,25 @@ public partial class ClientsWindow : FluentWindow
 
     private void OnAddBlockedIp(object sender, RoutedEventArgs e)
     {
-        ApplyBlock(BlockIpInput.Text.Trim(), "手动添加");
+        var ip = BlockIpInput.Text.Trim();
+        if (!SerialBridge.Core.Management.IpBlacklistService.TryNormalize(ip, out var normalized))
+        {
+            MessageBox.Show(this, "请输入有效的单个 IPv4 地址。", "黑名单管理",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (AppServices.Blacklist.IsBlocked(IPAddress.Parse(normalized)))
+        {
+            MessageBox.Show(this, "该 IP 已在黑名单中。", "黑名单管理",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (MessageBox.Show(this,
+            $"确定将 {normalized} 加入全局黑名单吗？" + Environment.NewLine +
+            "该 IP 在所有映射中的在线连接将立即断开，后续连接也会被拒绝。",
+            "确认添加黑名单", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        ApplyBlock(normalized, "手动添加");
     }
 
     private void ApplyBlock(string ip, string source)
