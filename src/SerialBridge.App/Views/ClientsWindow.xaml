@@ -109,10 +109,12 @@
             <TabItem Header="黑名单管理">
                 <DockPanel Margin="6">
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,2,0,8">
-                        <TextBox x:Name="BlockIpInput" Width="170" Margin="0,0,8,0"
-                                 ToolTip="输入单个 IPv4，例如 172.20.8.48" />
-                        <TextBox x:Name="BlockRemarkInput" Width="220" Margin="0,0,8,0"
-                                 ToolTip="可选备注或封禁原因" />
+                        <ui:TextBox x:Name="BlockIpInput" Width="210" Margin="0,0,8,0"
+                                    PlaceholderText="IP 地址（例如 192.168.1.100）"
+                                    ToolTip="请输入需要禁止连接的单个 IPv4 地址" />
+                        <ui:TextBox x:Name="BlockRemarkInput" Width="210" Margin="0,0,8,0"
+                                    PlaceholderText="备注（选填）"
+                                    ToolTip="选填，用于说明封禁原因或设备名称" />
                         <Button Content="添加 IP" Padding="10,4" Click="OnAddBlockedIp" />
                         <TextBlock Text="全局生效（所有映射）" Margin="12,0,0,0"
                                    VerticalAlignment="Center"
