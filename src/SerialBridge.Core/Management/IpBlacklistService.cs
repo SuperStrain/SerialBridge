@@ -31,16 +31,24 @@ public sealed class IpBlacklistService
     public static bool TryNormalize(string? input, out string ip)
     {
         ip = "";
-        if (!IPAddress.TryParse(input?.Trim(), out var parsed) ||
-            parsed.AddressFamily != AddressFamily.InterNetwork ||
-            parsed.Equals(IPAddress.Any) || parsed.Equals(IPAddress.Broadcast) ||
-            parsed.GetAddressBytes()[0] >= 224)
+        if (string.IsNullOrWhiteSpace(input)) return false;
+        var parts = input.Trim().Split('.');
+        if (parts.Length != 4) return false;
+        var bytes = new byte[4];
+        for (var i = 0; i < 4; i++)
+        {
+            var part = parts[i];
+            // Reject non-decimal and ambiguous leading-zero spellings.
+            if (part.Length is < 1 or > 3 || (part.Length > 1 && part[0] == '0') ||
+                part.Any(ch => ch is < '0' or > '9') ||
+                !byte.TryParse(part, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out bytes[i]))
+                return false;
+        }
+        var parsed = new IPAddress(bytes);
+        if (parsed.Equals(IPAddress.Any) || parsed.Equals(IPAddress.Broadcast) ||
+            bytes[0] is 0 or >= 224)
             return false;
-        // Require four dotted decimal components, not IPAddress.Parse's
-        // abbreviated / integer representations.
-        var parts = input!.Trim().Split('.');
-        if (parts.Length != 4 || parts.Any(p => p.Length is < 1 or > 3 ||
-            p.Any(ch => ch is < '0' or > '9'))) return false;
         ip = parsed.ToString();
         return true;
     }
