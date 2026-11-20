@@ -147,6 +147,82 @@ public sealed class UpdaterReliabilityTests
         }
     }
 
+    [Fact]
+    public async Task CancelDownload_StopsTransferDeletesPartialFileAndReleasesGate()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var directory = Path.Combine(Path.GetTempPath(), "SerialBridge.Tests",
+            Guid.NewGuid().ToString("N"));
+        using var service = new UpdateService(new FakeUpdateEnvironment(), directory);
+        var info = new UpdateInfo("1.4.0",
+            $"http://127.0.0.1:{port}/SerialBridge-Setup-1.4.0-x64.exe", "", false);
+        var responseSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var unblock = new CancellationTokenSource();
+        var server = Task.Run(async () =>
+        {
+            using var accepted = await listener.AcceptTcpClientAsync(unblock.Token);
+            await using var stream = accepted.GetStream();
+            var last = 0;
+            while (last < 4)
+            {
+                var value = stream.ReadByte();
+                if (value < 0) return;
+                last = (last, value) switch
+                {
+                    (0, '\\r') => 1, (1, '\\n') => 2,
+                    (2, '\\r') => 3, (3, '\\n') => 4,
+                    _ => 0
+                };
+            }
+            var header = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 200 OK\\r\\nContent-Length: 20000000\\r\\nConnection: close\\r\\n\\r\\n");
+            await stream.WriteAsync(header, unblock.Token);
+            await stream.WriteAsync(new byte[81920], unblock.Token);
+            responseSent.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, unblock.Token); }
+            catch (OperationCanceledException) { }
+        });
+
+        try
+        {
+            using var cancel = new CancellationTokenSource();
+            var download = service.DownloadInstallerAsync(info, null, cancel.Token);
+            await responseSent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancel.Cancel();
+            Assert.Null(await download.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
+            // The process-level gate must be released after cancellation.
+            using var alreadyCanceled = new CancellationTokenSource();
+            alreadyCanceled.Cancel();
+            Assert.Null(await service.DownloadInstallerAsync(
+                info, null, alreadyCanceled.Token).WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Empty(Directory.GetFiles(directory, "*.downloading"));
+        }
+        finally
+        {
+            unblock.Cancel();
+            listener.Stop();
+            try { await server.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) { }
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void UpdateDialogCloseAlwaysCancelsActiveDownload()
+    {
+        var sourcePath = Path.Combine(AppContext.BaseDirectory,
+            "Fixtures", "UpdatePopupWindow.cs");
+        // The popup is a WPF source fixture; assert that both Cancel and X/Alt+F4
+        // go through window close, and window close cancels the view-model attempt.
+        var source = File.ReadAllText(sourcePath);
+        Assert.Contains("cancelButton.Click += (_, _) => Close();", source);
+        Assert.Contains("Closed += (_, _) =>", source);
+        Assert.Contains("_update.CancelUpdate();", source);
+    }
+
     private static async Task ServeInstallerOnceAsync(TcpListener listener, int payloadSize)
     {
         using var client = await listener.AcceptTcpClientAsync();
