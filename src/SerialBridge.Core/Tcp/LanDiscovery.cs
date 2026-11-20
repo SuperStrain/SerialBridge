@@ -164,6 +164,10 @@ public sealed class LanDiscoveryResponder : IAsyncDisposable
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 }
 
+/// <summary>Scan results and number of eligible responding devices (including empty mappings).</summary>
+public sealed record LanDiscoveryScanResult(
+    IReadOnlyList<DiscoveredDevice> Devices, int RespondingDevices);
+
 public static class LanDiscoveryScanner
 {
     /// <summary>
@@ -205,14 +209,52 @@ public static class LanDiscoveryScanner
         return result;
     }
 
+    /// <summary>Pure destination builder, shared by runtime and regression tests.</summary>
+    public static IReadOnlyList<IPAddress> GetProbeDestinations(
+        string? targetSubnet, IPAddress? targetHost, IEnumerable<IPAddress> localBroadcasts)
+    {
+        if (targetHost is not null && !string.IsNullOrWhiteSpace(targetSubnet))
+            throw new ArgumentException("不能同时指定单个目标 IP 和目标网段。");
+        if (targetHost is not null &&
+            (targetHost.AddressFamily != AddressFamily.InterNetwork ||
+             IPAddress.IsLoopback(targetHost) ||
+             targetHost.Equals(IPAddress.Any) || targetHost.Equals(IPAddress.Broadcast) ||
+             targetHost.GetAddressBytes()[0] is 0 or >= 224))
+            throw new ArgumentException("目标 IP 必须是有效的远程 IPv4 单播地址。", nameof(targetHost));
+        if (!string.IsNullOrWhiteSpace(targetSubnet))
+            return ExpandCidr(targetSubnet);
+        if (targetHost is not null) return [targetHost];
+        return new[] { IPAddress.Broadcast }.Concat(localBroadcasts).Distinct().ToArray();
+    }
+
     /// <summary>
     /// Broadcast on local IPv4 interfaces. Optionally query a known host by
     /// unicast UDP when routers do not forward broadcasts across subnets.
     /// </summary>
     public static async Task<IReadOnlyList<DiscoveredDevice>> ScanAsync(
         TimeSpan timeout, CancellationToken token = default, IPAddress? targetHost = null,
+        string? targetSubnet = null) =>
+        (await ScanDetailedAsync(timeout, token, targetHost, targetSubnet)
+            .ConfigureAwait(false)).Devices;
+
+    /// <summary>
+    /// Explicit CIDR mode sends only to its hosts and accepts only responses
+    /// sourced from those hosts. The legacy targetHost option is also unicast-only.
+    /// Without either explicit target, discover on local broadcast domains.
+    /// </summary>
+    public static async Task<LanDiscoveryScanResult> ScanDetailedAsync(
+        TimeSpan timeout, CancellationToken token = default, IPAddress? targetHost = null,
         string? targetSubnet = null)
     {
+        if (targetHost is not null && !string.IsNullOrWhiteSpace(targetSubnet))
+            throw new ArgumentException("不能同时指定单个目标 IP 和目标网段。");
+        var subnetHosts = string.IsNullOrWhiteSpace(targetSubnet)
+            ? Array.Empty<IPAddress>()
+            : ExpandCidr(targetSubnet).ToArray();
+        HashSet<IPAddress>? allowedResponders = subnetHosts.Length != 0
+            ? subnetHosts.ToHashSet()
+            : targetHost is not null ? new HashSet<IPAddress> { targetHost } : null;
+
         using var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         udp.EnableBroadcast = true;
         udp.Client.ReceiveBufferSize = 1024 * 1024;
@@ -234,36 +276,29 @@ public static class LanDiscoveryScanner
         {
             Magic = LanDiscoveryProtocol.Magic, Type = "discover", RequestId = requestId,
         });
-        var destinations = new HashSet<IPAddress> { IPAddress.Broadcast };
-        foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+        var localBroadcasts = new List<IPAddress>();
+        if (allowedResponders is null)
         {
-            if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up ||
-                nic.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
-                continue;
-            foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+            foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
             {
-                if (unicast.Address.AddressFamily != AddressFamily.InterNetwork ||
-                    unicast.IPv4Mask is not { } mask) continue;
-                var ip = unicast.Address.GetAddressBytes();
-                var m = mask.GetAddressBytes();
-                destinations.Add(new IPAddress(Enumerable.Range(0, 4)
-                    .Select(i => (byte)(ip[i] | ~m[i])).ToArray()));
+                if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up ||
+                    nic.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
+                    continue;
+                foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                {
+                    if (unicast.Address.AddressFamily != AddressFamily.InterNetwork ||
+                        unicast.IPv4Mask is not { } mask) continue;
+                    var ip = unicast.Address.GetAddressBytes();
+                    var m = mask.GetAddressBytes();
+                    localBroadcasts.Add(new IPAddress(Enumerable.Range(0, 4)
+                        .Select(i => (byte)(ip[i] | ~m[i])).ToArray()));
+                }
             }
         }
-        if (targetHost is not null)
-        {
-            if (targetHost.AddressFamily != AddressFamily.InterNetwork ||
-                IPAddress.IsLoopback(targetHost) ||
-                targetHost.Equals(IPAddress.Any) || targetHost.Equals(IPAddress.Broadcast))
-                throw new ArgumentException("目标 IP 必须是有效的远程 IPv4 单播地址。", nameof(targetHost));
-            destinations.Add(targetHost);
-        }
-        var subnetHosts = string.IsNullOrWhiteSpace(targetSubnet)
-            ? Array.Empty<IPAddress>()
-            : ExpandCidr(targetSubnet).ToArray();
-        foreach (var address in subnetHosts) destinations.Add(address);
+        var destinations = GetProbeDestinations(targetSubnet, targetHost, localBroadcasts);
 
         var found = new Dictionary<Guid, DiscoveredDevice>();
+        var respondingIds = new HashSet<Guid>();
         using var window = CancellationTokenSource.CreateLinkedTokenSource(token);
         window.CancelAfter(timeout);
         // Receive while sending: early responders must not fill the UDP buffer.
@@ -277,6 +312,8 @@ public static class LanDiscoveryScanner
                 try
                 {
                     var response = await udp.ReceiveAsync(window.Token).ConfigureAwait(false);
+                    if (allowedResponders is not null &&
+                        !allowedResponders.Contains(response.RemoteEndPoint.Address)) continue;
                     if (response.Buffer.Length > LanDiscoveryProtocol.MaxPacketBytes) continue;
                     var p = JsonSerializer.Deserialize<DiscoveryPacket>(response.Buffer);
                     if (p?.Magic != LanDiscoveryProtocol.Magic || p.Type != "response" ||
@@ -288,6 +325,8 @@ public static class LanDiscoveryScanner
                         IPAddress.TryParse(m.ConnectAddress(response.RemoteEndPoint.Address.ToString()), out var bindAddress) &&
                         bindAddress.AddressFamily == AddressFamily.InterNetwork &&
                         !IPAddress.IsLoopback(bindAddress)).ToArray();
+                    respondingIds.Add(p.DeviceId);
+                    if (mappings.Length == 0) continue;
                     var name = (p.Name ?? "").Trim();
                     if (string.IsNullOrWhiteSpace(name)) name = "未命名设备";
                     if (name.Length > 80) name = name[..80];
@@ -336,6 +375,8 @@ public static class LanDiscoveryScanner
             await receiver.ConfigureAwait(false);
         }
         token.ThrowIfCancellationRequested();
-        return found.Values.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        return new LanDiscoveryScanResult(
+            found.Values.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
+            respondingIds.Count);
     }
 }

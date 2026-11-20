@@ -342,14 +342,17 @@ public sealed class RemoteConnectionsView : UserControl
         _status.Text = "正在扫描局域网（约 3 秒）…";
         try
         {
-            var devices = await LanDiscoveryScanner.ScanAsync(TimeSpan.FromSeconds(3),
+            var scan = await LanDiscoveryScanner.ScanDetailedAsync(TimeSpan.FromSeconds(3),
                 targetSubnet: subnet);
+            var devices = scan.Devices;
             // Only the completed scan replaces the previous results. Do not
             // append responses to a list still owned by another run.
             _discoveredList.Children.Clear();
-            _status.Text = devices.Count == 0
-                ? "未发现设备。请确认对方允许被发现、映射正在监听且防火墙未拦截 UDP 39001。"
-                : $"发现 {devices.Count} 台设备。";
+            _status.Text = devices.Count > 0
+                ? $"发现 {devices.Count} 台有可用 COM 映射的设备。"
+                : scan.RespondingDevices > 0
+                    ? $"发现 {scan.RespondingDevices} 台 SerialBridge，但没有可用的 COM 映射。"
+                    : "未发现设备。请确认目标网段、路由、对方发现开关及 UDP 39001 防火墙规则。";
             foreach (var device in devices)
             {
                 var group = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };

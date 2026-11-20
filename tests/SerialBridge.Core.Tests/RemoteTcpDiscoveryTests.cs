@@ -47,6 +47,50 @@ public sealed class RemoteTcpDiscoveryTests
     }
 
     [Fact]
+    public void ExplicitCidrProbeDoesNotIncludeLocalBroadcastOrOtherSubnets()
+    {
+        var localBroadcasts = new[]
+        {
+            IPAddress.Parse("172.20.8.255"),
+            IPAddress.Parse("192.168.1.255")
+        };
+        var targets = LanDiscoveryScanner.GetProbeDestinations(
+            "172.20.10.0/24", null, localBroadcasts);
+        Assert.Equal(254, targets.Count);
+        Assert.All(targets, ip => Assert.Equal("172.20.10",
+            string.Join(".", ip.GetAddressBytes().Take(3))));
+        Assert.DoesNotContain(IPAddress.Broadcast, targets);
+        Assert.DoesNotContain(IPAddress.Parse("172.20.8.255"), targets);
+
+        var one = LanDiscoveryScanner.GetProbeDestinations(
+            "172.20.10.0/32", null, localBroadcasts);
+        Assert.Equal(new[] { IPAddress.Parse("172.20.10.0") }, one);
+
+        var exactHost = LanDiscoveryScanner.GetProbeDestinations(
+            "172.20.10.10/32", null, localBroadcasts);
+        Assert.Equal(new[] { IPAddress.Parse("172.20.10.10") }, exactHost);
+    }
+
+    [Fact]
+    public void BroadcastProbesOnlyUsedWhenNoExplicitTarget()
+    {
+        var local = new[] { IPAddress.Parse("172.20.8.255") };
+        var targets = LanDiscoveryScanner.GetProbeDestinations(null, null, local);
+        Assert.Contains(IPAddress.Broadcast, targets);
+        Assert.Contains(IPAddress.Parse("172.20.8.255"), targets);
+        var single = LanDiscoveryScanner.GetProbeDestinations(
+            null, IPAddress.Parse("172.20.10.10"), local);
+        Assert.Equal(new[] { IPAddress.Parse("172.20.10.10") }, single);
+    }
+
+    [Fact]
+    public void CombiningSingleHostAndCidrIsRejected()
+    {
+        Assert.Throws<ArgumentException>(() => LanDiscoveryScanner.GetProbeDestinations(
+            "172.20.10.0/24", IPAddress.Parse("172.20.10.10"), []));
+    }
+
+    [Fact]
     public async Task RemoteSession_ExchangesRawBytesAndSurvivesTerminalOwnership()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
