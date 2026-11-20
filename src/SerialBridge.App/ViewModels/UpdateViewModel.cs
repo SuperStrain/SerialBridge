@@ -19,8 +19,9 @@ public partial class UpdateViewModel : ObservableObject
         var current = _downloadCancellation;
         if (current is null) return;
         current.Cancel();
-        PopupStatusText = "已取消升级下载。";
-        PopupActionVisible = true;
+        // Keep Update disabled until the old HTTP/file cleanup releases its gate.
+        PopupStatusText = "正在取消升级下载…";
+        PopupActionVisible = false;
     }
 
 
