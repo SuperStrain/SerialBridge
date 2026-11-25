@@ -262,6 +262,7 @@ public sealed class RemoteTcpDiscoveryTests
             responder.Start();
             Assert.True(responder.IsRunning);
             using var trafficCancel = new CancellationTokenSource();
+            var firstProbeSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var traffic = Task.Run(async () =>
             {
                 while (!trafficCancel.IsCancellationRequested)
@@ -270,17 +271,28 @@ public sealed class RemoteTcpDiscoveryTests
                     {
                         await sender.SendAsync(request,
                             new IPEndPoint(IPAddress.Loopback, port), trafficCancel.Token);
+                        firstProbeSent.TrySetResult();
                     }
                     catch (OperationCanceledException) when (trafficCancel.IsCancellationRequested)
                     {
                         break;
                     }
-                    await Task.Yield();
+                    // Bound probe frequency: Task.Yield() alone makes this an
+                    // unbounded UDP flood that can starve unrelated TCP/serial
+                    // tests sharing the Windows CI runner's thread pool.
+                    // A request remains active throughout responder shutdown.
+                    try { await Task.Delay(5, trafficCancel.Token); }
+                    catch (OperationCanceledException) when (trafficCancel.IsCancellationRequested)
+                    {
+                        break;
+                    }
                 }
             });
             try
             {
-                await Task.Delay(20);
+                // Prove each round actually had in-flight discovery traffic.
+                await firstProbeSent.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                await Task.Delay(40);
                 await responder.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Assert.False(responder.IsRunning);
             }
