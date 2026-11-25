@@ -262,6 +262,7 @@ public sealed class RemoteTcpDiscoveryTests
             responder.Start();
             Assert.True(responder.IsRunning);
             using var trafficCancel = new CancellationTokenSource();
+            var firstProbeSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var traffic = Task.Run(async () =>
             {
                 while (!trafficCancel.IsCancellationRequested)
@@ -270,6 +271,7 @@ public sealed class RemoteTcpDiscoveryTests
                     {
                         await sender.SendAsync(request,
                             new IPEndPoint(IPAddress.Loopback, port), trafficCancel.Token);
+                        firstProbeSent.TrySetResult();
                     }
                     catch (OperationCanceledException) when (trafficCancel.IsCancellationRequested)
                     {
@@ -288,6 +290,8 @@ public sealed class RemoteTcpDiscoveryTests
             });
             try
             {
+                // Prove each round actually had in-flight discovery traffic.
+                await firstProbeSent.Task.WaitAsync(TimeSpan.FromSeconds(3));
                 await Task.Delay(40);
                 await responder.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Assert.False(responder.IsRunning);
