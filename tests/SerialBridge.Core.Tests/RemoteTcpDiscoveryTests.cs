@@ -275,12 +275,20 @@ public sealed class RemoteTcpDiscoveryTests
                     {
                         break;
                     }
-                    await Task.Yield();
+                    // Bound probe frequency: Task.Yield() alone makes this an
+                    // unbounded UDP flood that can starve unrelated TCP/serial
+                    // tests sharing the Windows CI runner's thread pool.
+                    // A request remains active throughout responder shutdown.
+                    try { await Task.Delay(5, trafficCancel.Token); }
+                    catch (OperationCanceledException) when (trafficCancel.IsCancellationRequested)
+                    {
+                        break;
+                    }
                 }
             });
             try
             {
-                await Task.Delay(20);
+                await Task.Delay(40);
                 await responder.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Assert.False(responder.IsRunning);
             }
