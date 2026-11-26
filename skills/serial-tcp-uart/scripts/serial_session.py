@@ -79,6 +79,17 @@ class CommandCompletionTimeoutError(PromptTimeoutError):
         self.capture_path = capture_path
 
 
+class CommandCaptureError(SerialTcpError):
+    """本地日志文件写入失败；命令是否完成由 command_completed 标识。"""
+
+    command_may_have_executed = True
+
+    def __init__(self, message, command_completed=False, capture_path=None):
+        super().__init__(message)
+        self.command_completed = command_completed
+        self.capture_path = capture_path
+
+
 @dataclass(frozen=True)
 class CommandResult:
     """命令完成结果。exit_code=None 表示使用提示符模式，未获取 Shell 退出码。"""
@@ -475,11 +486,16 @@ class SerialTcpSession:
         rc_var = "__serial_session_rc_" + token
         # Braces preserve shell state (for example, cd); the newline before }
         # also prevents a trailing shell comment in cmd from swallowing the wrapper.
+        # Keep the entire protocol in one outer compound command. Interactive
+        # shells may emit PS1/PS2 between top-level commands; those prompts must
+        # not be mistaken for command output between the markers.
         wrapper = (
+            "{\n"
             "printf '\\n%s\\n' '" + begin + "'\n"
             "{\n" + cmd + "\n}\n"
             + rc_var + "=$?\n"
             + "printf '\\n%s:%s\\n' '" + end + "' \"$" + rc_var + "\"\n"
+            + "}\n"
         )
         begin_re = re.compile(
             rb"(?:^|\r?\n)" + re.escape(begin.encode("ascii")) + rb"\r?\n"
@@ -546,6 +562,7 @@ class SerialTcpSession:
                 raw = bytes(head) + bytes(tail)
             return raw.decode("utf-8", "replace").strip(), truncated
 
+        command_completed = False
         try:
             try:
                 self.send_raw(wrapper.encode("utf-8"))
@@ -626,17 +643,18 @@ class SerialTcpSession:
                 match = end_re.search(buffer)
                 if match:
                     exit_code = int(match.group(1))
-                    capture(bytes(buffer[:match.start()]))
                     remainder = bytes(buffer[match.end():])
                     self._store_pending(
                         previous + bytes(prelude) + remainder,
                         previous_truncated or prelude_truncated
                     )
+                    command_completed = True
+                    self._command_state_uncertain = False
+                    capture(bytes(buffer[:match.start()]))
                     buffer.clear()
                     if file_handle is not None:
                         file_handle.flush()
                     preview, truncated = make_preview()
-                    self._command_state_uncertain = False
                     return CommandResult(
                         output=preview,
                         exit_code=exit_code,
@@ -651,9 +669,39 @@ class SerialTcpSession:
                 if safe_length > 0:
                     capture(bytes(buffer[:safe_length]))
                     del buffer[:safe_length]
+        except OSError as exc:
+            if command_completed:
+                self._command_state_uncertain = False
+                raise CommandCaptureError(
+                    "Shell 命令已收到结束标记，但本地采集文件写入/刷新失败；"
+                    "命令已完成，日志文件可能不完整。",
+                    command_completed=True, capture_path=path_text
+                ) from exc
+            self._command_state_uncertain = True
+            raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
+            self._store_pending(
+                previous + bytes(prelude) + raw_tail,
+                previous_truncated or prelude_truncated
+            )
+            raise CommandCaptureError(
+                "本地采集文件写入失败，Shell 命令可能已经执行但完成状态未知；"
+                "当前会话已锁定，请勿重发命令。",
+                command_completed=False, capture_path=path_text
+            ) from exc
         finally:
             if file_handle is not None:
-                file_handle.close()
+                active_exception = sys.exc_info()[0] is not None
+                try:
+                    file_handle.close()
+                except OSError as exc:
+                    if not active_exception:
+                        self._command_state_uncertain = not command_completed
+                        raise CommandCaptureError(
+                            "关闭本地采集文件失败；" +
+                            ("Shell 命令已完成，但日志文件可能不完整。" if command_completed
+                             else "Shell 命令可能已经执行，完成状态未知。"),
+                            command_completed=command_completed, capture_path=path_text
+                        ) from exc
 
     def interrupt(self):
         """发送 Ctrl+C 清空设备当前输入行。"""
