@@ -365,7 +365,12 @@ public sealed class UpdateService : IDisposable
             var codeHtml = Regex.Replace(match.Groups["code"].Value, @"<[^>]+>", "");
             var code = WebUtility.HtmlDecode(codeHtml);
             var fence = new string((char)96, Math.Max(1, LongestBacktickRun(code) + 1));
-            var markdown = fence + code + fence;
+            // Separate edge backticks/whitespace from the delimiter. CommonMark
+            // otherwise merges adjacent backticks or trims meaningful edge spaces.
+            var padding = code.Length > 0 &&
+                (code[0] == (char)96 || code[^1] == (char)96 ||
+                 char.IsWhiteSpace(code[0]) || char.IsWhiteSpace(code[^1])) ? " " : "";
+            var markdown = fence + padding + code + padding + fence;
             var placeholder = "\uE000INLINECODE" + inlineCode.Count + "\uE001";
             inlineCode.Add(markdown);
             return placeholder;
