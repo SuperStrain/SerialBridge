@@ -216,6 +216,16 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
             session.close()
             thread.join(timeout=2)
 
+    def test_pending_async_data_is_bounded_and_reports_truncation(self):
+        session = SerialTcpSession("127.0.0.1", 1)
+        session._store_pending(b"x" * (2 * 1024 * 1024))
+        self.assertEqual(len(session._pending), 1024 * 1024)
+        self.assertTrue(session._pending_truncated)
+        preview = session.read_available(duration=0, max_bytes=128)
+        self.assertLessEqual(len(preview), 128)
+        self.assertTrue(session.last_read_truncated)
+        self.assertEqual(session.last_read_bytes, 1024 * 1024)
+
 
 if __name__ == "__main__":
     unittest.main()
