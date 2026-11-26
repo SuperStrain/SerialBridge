@@ -618,9 +618,14 @@ class SerialTcpSession:
                     if started:
                         capture(bytes(buffer))
                         buffer.clear()
+                        pending_output = bytes(tail)
+                    else:
+                        pending_output = bytes(buffer)
                     self._command_state_uncertain = True
-                    self._store_pending(previous + bytes(prelude) + raw_tail[-65536:],
-                                        previous_truncated or prelude_truncated)
+                    self._store_pending(
+                        previous + bytes(prelude) + pending_output,
+                        previous_truncated or prelude_truncated
+                    )
                     raise CommandCompletionTimeoutError(
                         "等待 Shell 命令结束标记时 TCP 连接关闭；命令可能已经执行，"
                         "不要自动重发。请重新连接并人工确认。",
