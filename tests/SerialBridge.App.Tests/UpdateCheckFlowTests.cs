@@ -13,6 +13,14 @@ namespace SerialBridge.App.Tests;
 /// </summary>
 public sealed class UpdateCheckFlowTests
 {
+    private static string InlineText(System.Windows.Documents.Inline inline) => inline switch
+    {
+        System.Windows.Documents.Run run => run.Text,
+        System.Windows.Documents.LineBreak => "\n",
+        System.Windows.Documents.Span span => string.Concat(span.Inlines.Select(InlineText)),
+        _ => ""
+    };
+
     private const string NewVersionJson = """
         [
           {
@@ -82,7 +90,14 @@ public sealed class UpdateCheckFlowTests
                 <id>{baseUrl}/releases/tag/v9.9.9</id>
                 <link rel="alternate" href="{baseUrl}/releases/tag/v9.9.9" />
                 <title>SerialBridge v9.9.9</title>
-                <content type="html">&lt;h1&gt;SerialBridge v9.9.9&lt;/h1&gt;&lt;p&gt;本版本包含问题修复。&lt;/p&gt;&lt;h2&gt;问题修复&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;&lt;strong&gt;修复串口停止超时&lt;/strong&gt;（&lt;a href=&quot;https://github.com/SuperStrain/SerialBridge/pull/49&quot;&gt;变更记录&lt;/a&gt;）&lt;/li&gt;&lt;/ul&gt;</content>
+                <content type="html">
+                  &lt;h1&gt;SerialBridge v9.9.9&lt;/h1&gt;&lt;p&gt;本版本包含问题修复。&lt;/p&gt;
+                  &lt;h2&gt;问题修复&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;&lt;strong&gt;修复串口停止超时&lt;/strong&gt;（&lt;a href=&quot;https://github.com/SuperStrain/SerialBridge/pull/49&quot;&gt;变更记录&lt;/a&gt;）&lt;/li&gt;&lt;/ul&gt;
+                  &lt;p&gt;参数 &amp;lt;port&amp;gt; 应保留。&lt;/p&gt;
+                  &lt;pre&gt;&lt;code&gt;if x:
+                    run()
+                  &lt;/code&gt;&lt;/pre&gt;
+                </content>
               </entry>
             </feed>
             """;
@@ -196,6 +211,15 @@ public sealed class UpdateCheckFlowTests
             Assert.Contains("## 问题修复", viewModel.ReleaseNotes);
             Assert.Contains("https://github.com/SuperStrain/SerialBridge/pull/49", viewModel.ReleaseNotes);
             Assert.DoesNotContain("旧版本内容", viewModel.ReleaseNotes);
+            Assert.Contains("&lt;port&gt;", viewModel.ReleaseNotes);
+            Assert.Contains("    run()", viewModel.ReleaseNotes);
+            Assert.Contains(new string((char)96, 3), viewModel.ReleaseNotes);
+
+            var document = ReleaseNotesRenderer.ToFlowDocument(viewModel.ReleaseNotes);
+            var renderedText = string.Concat(document.Blocks.OfType<System.Windows.Documents.Paragraph>()
+                .Select(paragraph => string.Concat(paragraph.Inlines.Select(InlineText))));
+            Assert.Contains("<port>", renderedText);
+            Assert.Contains("    run()", renderedText);
             await server;
         }
         finally
