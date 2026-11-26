@@ -308,6 +308,26 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
             finally:
                 session.close()
 
+    def test_eof_does_not_duplicate_async_prelude_and_preserves_partial_output(self):
+        def response(conn, begin, _end, send, _request):
+            send(
+                conn,
+                b"\r\nWRN:background before marker\r\n"
+                + begin + b"\r\npartial command output"
+            )
+
+        with FakeShellServer(response) as server:
+            session = SerialTcpSession("127.0.0.1", server.port, default_timeout=2)
+            self.assertTrue(session.connect())
+            try:
+                with self.assertRaises(CommandCompletionTimeoutError):
+                    session.exec_command_result("uname -a", completion="shell", timeout=2)
+                pending = session.read_available(duration=0, max_bytes=8192)
+                self.assertEqual(pending.count(b"WRN:background before marker"), 1)
+                self.assertIn(b"partial command output", pending)
+            finally:
+                session.close()
+
 
 if __name__ == "__main__":
     unittest.main()
