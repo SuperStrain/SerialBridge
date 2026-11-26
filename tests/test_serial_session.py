@@ -370,7 +370,7 @@ class SerialSessionPromptOutputLimitTests(unittest.TestCase):
         def device():
             try:
                 request = bytearray()
-                while not request.endswith(b"\\r"):
+                while not request.endswith(b"\r"):
                     request.extend(writer.recv(4096))
                 received.append(bytes(request))
                 writer.sendall(
