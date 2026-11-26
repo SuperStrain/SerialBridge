@@ -132,7 +132,7 @@ class SerialTcpSession:
                 self.sock = socket.create_connection(
                     (self.host, self.port), timeout=self.connect_timeout)
                 self.sock.setblocking(False)
-                first = self._recv_for(0.4)
+                first = self._recv_for(0.4, max_bytes=65536)
                 if first is None:
                     self.close()
                     continue
@@ -253,7 +253,7 @@ class SerialTcpSession:
             if remaining <= 0:
                 self._store_pending(bytes(acc), self._last_wait_truncated)
                 raise PromptTimeoutError(f"等待提示符超时（已收到 {bytes(acc[-200:])!r}）")
-            chunk = self._recv_for(min(remaining, 0.15))
+            chunk = self._recv_for(min(remaining, 0.15), max_bytes=65536)
             if chunk is None:
                 self._store_pending(bytes(acc), self._last_wait_truncated)
                 raise SerialTcpError("连接被对端关闭")
@@ -631,7 +631,7 @@ class SerialTcpSession:
         """发送 Ctrl+C 清空设备当前输入行。"""
         self.send_raw(b"\x03")
         time.sleep(0.1)
-        response = self._recv_for(0.2)
+        response = self._recv_for(0.2, max_bytes=65536)
         if response:
             self._store_pending(bytes(self._pending) + response, self._pending_truncated)
 
@@ -692,9 +692,15 @@ def main(argv):
                     print(f"输出已截断；完整输出: {result.capture_path or '未保存文件'}", file=sys.stderr)
         elif args.cmd == "raw":
             s.send_raw(bytes.fromhex(args.hex.replace(" ", "")))
-            data = s.read_available(args.wait)
+            data = s.read_available(args.wait, max_bytes=args.max_output_bytes, capture_path=args.capture)
             print(data.hex(" "))
             sys.stdout.write(data.decode("utf-8", "replace"))
+            if s.last_read_truncated:
+                destination = s.last_read_capture_path or "未保存文件"
+                print(
+                    f"输出已截断（采集 {s.last_read_bytes} 字节）；完整输出: {destination}",
+                    file=sys.stderr
+                )
         return 0
     except PromptTimeoutError as e:
         print(f"超时：{e}", file=sys.stderr)
