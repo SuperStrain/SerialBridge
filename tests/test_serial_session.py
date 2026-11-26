@@ -276,6 +276,38 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
             finally:
                 session.close()
 
+    def test_capture_write_failure_locks_session_when_command_completion_is_unknown(self):
+        class BrokenCapture:
+            def write(self, _data):
+                raise OSError("disk full")
+
+            def flush(self):
+                pass
+
+            def close(self):
+                pass
+
+        def response(conn, begin, _end, send, _request):
+            send(conn, b"\r\n" + begin + b"\r\n" + (b"large output " * 4096))
+
+        with FakeShellServer(response) as server:
+            session = SerialTcpSession("127.0.0.1", server.port, default_timeout=2)
+            self.assertTrue(session.connect())
+            try:
+                with mock.patch("builtins.open", return_value=BrokenCapture()):
+                    with self.assertRaises(CommandCaptureError) as caught:
+                        session.exec_command_result(
+                            "cat /var/log/messages", completion="shell",
+                            timeout=2, capture_path="/fake/capture.log"
+                        )
+                self.assertFalse(caught.exception.command_completed)
+                self.assertTrue(caught.exception.command_may_have_executed)
+                with self.assertRaises(SerialTcpError):
+                    session.exec_command_result("reboot", completion="shell", timeout=2)
+                self.assertEqual(len(server.requests), 1)
+            finally:
+                session.close()
+
 
 if __name__ == "__main__":
     unittest.main()
