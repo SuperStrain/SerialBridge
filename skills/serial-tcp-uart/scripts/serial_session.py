@@ -44,7 +44,7 @@ from dataclasses import dataclass
 
 # 默认 shell 提示符：覆盖 "~ # "、"$ "、"# "、"[root@host ~]# " 等常见样式。
 # 若设备提示符不匹配，用 --prompt 显式指定（正则，按行尾匹配）。
-DEFAULT_PROMPT_RE = r"(?:^|\r?\n)(?:\[[^\]\r\n]{1,40}\]|\([^\)\r\n]{1,40}\)|[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+(?:[^\r\n ]*)?|[A-Za-z0-9_.-]+)?[ \t]?(?:~[ \t]?)?[\$#] (?=(?:\r?\n|$|(?:WRN|ERR|INF|DBG|INFO|WARN|ERROR|NOTICE|DEBUG|CRIT|ALERT|EMERG):))
+DEFAULT_PROMPT_RE = r"(?:^|\r?\n)(?:\[[^\]\r\n]{1,40}\]|\([^\)\r\n]{1,40}\)|[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+(?:[^\r\n ]*)?|[A-Za-z0-9_.-]+)?[ \t]?(?:~[ \t]?)?[\$#] (?=(?:\r?\n|$|(?:WRN|ERR|INF|DBG|INFO|WARN|ERROR|NOTICE|DEBUG|CRIT|ALERT|EMERG):))"
 
 LOGIN_RE = re.compile(rb"(?i)login\s*:\s*$")
 PASSWORD_RE = re.compile(rb"(?i)password\s*:\s*$")
