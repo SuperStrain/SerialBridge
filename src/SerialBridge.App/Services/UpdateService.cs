@@ -149,7 +149,9 @@ public sealed class UpdateService : IDisposable
             {
                 // Some proxy/API responses omit the body even when the Release has notes.
                 // Recover it from the same tag's public feed without affecting version detection.
-                var repoBase = ReleasesPageUrl[..^"/releases/latest".Length];
+                var repoBase = _fallbackUrl.EndsWith("/releases/latest", StringComparison.OrdinalIgnoreCase)
+                    ? _fallbackUrl[..^"/releases/latest".Length]
+                    : _fallbackUrl;
                 var feedNotes = await TryGetReleaseNotesFromFeedAsync(repoBase, tag, ct);
                 if (!string.IsNullOrWhiteSpace(feedNotes))
                     updateInfo = updateInfo with { ReleaseNotes = feedNotes };
