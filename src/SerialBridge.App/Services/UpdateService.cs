@@ -318,35 +318,90 @@ public sealed class UpdateService : IDisposable
     /// <summary>将 Atom feed 中已渲染的 Release HTML 转成可再次交给 Markdown 渲染器的文本。</summary>
     private static string ConvertReleaseHtmlToMarkdown(string html)
     {
-        var text = Regex.Replace(html, @"<!--.*?-->", "", RegexOptions.Singleline);
+        var codeBlocks = new List<string>();
+        var text = Regex.Replace(html, @"<pre\b[^>]*>(?<code>.*?)</pre\s*>", match =>
+        {
+            // Treat <pre> as one unit. Do not subsequently wrap its nested <code>
+            // element or normalize its indentation with ordinary paragraph text.
+            var codeHtml = Regex.Replace(match.Groups["code"].Value, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+            codeHtml = Regex.Replace(codeHtml, @"</?code\b[^>]*>", "", RegexOptions.IgnoreCase);
+            codeHtml = Regex.Replace(codeHtml, @"<[^>]+>", "");
+            var code = WebUtility.HtmlDecode(codeHtml).Replace("\r\n", "\n").Trim('\r', '\n');
+            var fence = new string((char)96, Math.Max(3, LongestBacktickRun(code) + 1));
+            var markdown = fence + "\n" + code + "\n" + fence;
+            var placeholder = "\uE000CODEBLOCK" + codeBlocks.Count + "\uE001";
+            codeBlocks.Add(markdown);
+            return "\n\n" + placeholder + "\n\n";
+        }, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        var inlineCode = new List<string>();
+        text = Regex.Replace(text, @"<code\b[^>]*>(?<code>.*?)</code\s*>", match =>
+        {
+            var codeHtml = Regex.Replace(match.Groups["code"].Value, @"<[^>]+>", "");
+            var code = WebUtility.HtmlDecode(codeHtml);
+            var fence = new string((char)96, Math.Max(1, LongestBacktickRun(code) + 1));
+            var markdown = fence + code + fence;
+            var placeholder = "\uE000INLINECODE" + inlineCode.Count + "\uE001";
+            inlineCode.Add(markdown);
+            return placeholder;
+        }, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
         text = Regex.Replace(text,
             @"<a\b[^>]*href\s*=\s*(['""])(?<url>.*?)\1[^>]*>(?<text>.*?)</a>",
-            match => string.Concat(match.Groups["text"].Value, " (", match.Groups["url"].Value, ")"),
+            match =>
+            {
+                var label = Regex.Replace(match.Groups["text"].Value, @"<[^>]+>", "");
+                return string.Concat(label, " (", match.Groups["url"].Value, ")");
+            },
             RegexOptions.IgnoreCase | RegexOptions.Singleline);
         text = Regex.Replace(text, @"<h([1-6])\b[^>]*>",
-            match => new string('#', int.Parse(match.Groups[1].Value)) + " ",
+            match => "\n\n" + new string('#', int.Parse(match.Groups[1].Value)) + " ",
             RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</h[1-6]\s*>", "\n\n", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"<pre\b[^>]*>", "\n" + new string((char)96, 3) + "\n", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"</pre\s*>", "\n" + new string((char)96, 3) + "\n", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"<li\b[^>]*>", "- ", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<li\b[^>]*>", "\n- ", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</li\s*>", "\n", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"<hr\b[^>]*>", "\n---\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<hr\b[^>]*>", "\n\n---\n\n", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<(strong|b)\b[^>]*>", "**", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</(strong|b)\s*>", "**", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<(em|i)\b[^>]*>", "*", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</(em|i)\s*>", "*", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"<code\b[^>]*>", new string((char)96, 1), RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"</code\s*>", new string((char)96, 1), RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</(p|div|ul|ol|blockquote|table|tr)\s*>", "\n\n", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<(p|div|ul|ol|blockquote|table|tr)\b[^>]*>", "", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<[^>]+>", "");
-        text = WebUtility.HtmlDecode(text).Replace('\u00a0', ' ');
+
+        // Keep HTML entities in ordinary text. Markdig decodes &lt;port&gt; as
+        // literal text; decoding it here first would make <port> look like HTML.
+        text = Regex.Replace(text, @"&nbsp;|&#160;", " ", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"[ \t]+\r?\n", "\n");
         text = Regex.Replace(text, @"\n[ \t]+", "\n");
         text = Regex.Replace(text, @"\n{3,}", "\n\n");
-        return text.Trim();
+        text = text.Trim();
+
+        for (var i = 0; i < inlineCode.Count; i++)
+            text = text.Replace("\uE000INLINECODE" + i + "\uE001", inlineCode[i], StringComparison.Ordinal);
+        for (var i = 0; i < codeBlocks.Count; i++)
+            text = text.Replace("\uE000CODEBLOCK" + i + "\uE001", codeBlocks[i], StringComparison.Ordinal);
+        return text;
+    }
+
+    private static int LongestBacktickRun(string value)
+    {
+        var longest = 0;
+        var current = 0;
+        foreach (var character in value)
+        {
+            if (character == (char)96)
+            {
+                current++;
+                longest = Math.Max(longest, current);
+            }
+            else
+            {
+                current = 0;
+            }
+        }
+        return longest;
     }
 
     /// <summary>读 x-ratelimit-reset 设置进程级退避窗口；期间不再请求 API（每次 403 也无意义）。</summary>
