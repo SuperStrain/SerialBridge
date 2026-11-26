@@ -64,7 +64,7 @@ public partial class UpdateViewModel : ObservableObject
     private void ShowBadge(UpdateInfo info)
     {
         _cachedInfo = info;
-        ReleaseNotes = info.ReleaseNotes ?? "（发布页未提供更新说明，请前往发布页查看。）";
+        ReleaseNotes = info.ReleaseNotes ?? "（暂时无法加载更新说明，请点击右上角“前往发布”查看。）";
         UpdatePopupTitle = $"新版本 v{info.Version}";
         UpdateBadgeVersion = $"发现新版本 v{info.Version}，点击查看更新内容";
         UpdateBadgeVisible = true;
