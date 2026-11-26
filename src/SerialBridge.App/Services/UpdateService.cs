@@ -395,8 +395,11 @@ public sealed class UpdateService : IDisposable
         text = Regex.Replace(text, @"<(p|div|ul|ol|blockquote|table|tr)\b[^>]*>", "", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<[^>]+>", "");
 
-        // Keep HTML entities in ordinary text. Markdig decodes &lt;port&gt; as
-        // literal text; decoding it here first would make <port> look like HTML.
+        // Escape encoded angle brackets before the second Markdown parse.
+        // Otherwise Markdig may classify the decoded <port> as raw HTML and the
+        // FlowDocument renderer will strip it as a tag.
+        text = Regex.Replace(text, @"&lt;", _ => "\\<", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"&gt;", _ => "\\>", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"&nbsp;|&#160;", " ", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"[ \t]+\r?\n", "\n");
         text = Regex.Replace(text, @"\n[ \t]+", "\n");
