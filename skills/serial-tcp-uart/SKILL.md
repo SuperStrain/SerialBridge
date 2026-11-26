@@ -77,6 +77,11 @@ python3 serial_session.py --host 192.168.1.100 --port 9001 \
 python3 serial_session.py --host 192.168.1.100 --port 9001 \
     --prompt '(buildroot@.* [#] )' exec "version"
 python3 serial_session.py --host 192.168.1.100 --port 9001 raw --hex "4154 0d" --wait 2
+
+# Raw / 二进制响应或长时间串口采集：完整接收数据保存到文件
+python3 serial_session.py --host 192.168.1.100 --port 9001 \
+    --capture /tmp/uart-raw.bin --max-output-bytes 65536 \
+    raw --hex "4154 0d" --wait 30
 ```
 
 CLI 退出码：0 表示交互协议完成（Shell 命令自身的退出码单独打印到 stderr）；2 连接、发送或输入错误；3 发现连接被立即拒绝（疑似端口被占用）；4 等待命令完成标记/提示符超时。库调用请使用 `exec_command_result()` 检查 `result.exit_code`；`None` 表示提示符模式无法获知 Shell 退出码。
