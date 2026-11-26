@@ -23,11 +23,11 @@ agent 身份可靠地与设备交互。
 4. **TCP 是字节流，没有消息边界**。不要假设一次 `recv` 对应一条设备响应。已确认进入
    POSIX/Linux Shell 时，优先使用 `completion="shell"` 随机开始/结束标记协议；它不依赖
    提示符或 TCP 分块边界。U-Boot、MCU CLI 或其他非 Shell 终端继续使用默认
+   `completion="prompt"` 模式，不得把 Shell 包装命令发送给这些终端。
 5. **不要用交互式终端工具做 Agent 交互**：
    - `nc` 的 stdin 是行缓冲模式——Tab、Ctrl+C 等按键可能被本地终端缓存到回车后才发送，设备收不到实时按键；
    - `telnet` 会解释 0xFF（IAC）字节并改写行尾，二进制协议必坏；
    - Agent 交互一律用下面的脚本方式（raw socket 无上述问题）。
-   - agent 交互一律用下面的脚本方式（raw socket 无上述问题）。
 
 ## 首选方式：scripts/serial_session.py
 
