@@ -130,7 +130,7 @@ public sealed class UpdateService : IDisposable
                 return await CheckViaWebRedirectAsync(ct);
             }
             if (!resp.IsSuccessStatusCode)
-                return await CheckViaWebRedirectAsync(cts.Token);
+                return await CheckViaWebRedirectAsync(ct);
 
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cts.Token));
             if (!ReleaseParsing.TrySelectHighestRelease(doc.RootElement, out var release, out var tag))
