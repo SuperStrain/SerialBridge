@@ -67,6 +67,38 @@ public sealed class UpdateCheckFlowTests
         return (service, ServeJsonOnceAsync(listener, json));
     }
 
+    private static (UpdateService Service, Task Server, TcpListener Listener, CancellationTokenSource ServerCancellation)
+        StartApiServerWithFeed(string json, int feedStatus, string feed)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var baseUrl = $"http://127.0.0.1:{port}";
+        var service = new UpdateService(
+            new FakeUpdateEnvironment("1.3.2"),
+            downloadDirOverride: Path.Combine(Path.GetTempPath(), "SerialBridge.Tests", Guid.NewGuid().ToString("N")),
+            apiUrlOverride: $"{baseUrl}/releases",
+            fallbackUrlOverride: $"{baseUrl}/releases/latest");
+        var serverCancellation = new CancellationTokenSource();
+        return (service, ServeJsonAndFeedAsync(listener, json, feedStatus, feed, serverCancellation.Token),
+            listener, serverCancellation);
+    }
+
+    private static async Task ServeJsonAndFeedAsync(
+        TcpListener listener, string json, int feedStatus, string feed, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RespondOnceAsync(listener, 200, "OK", json, "application/json; charset=utf-8", cancellationToken);
+            await RespondOnceAsync(listener, feedStatus, feedStatus == 200 ? "OK" : "Not Found",
+                feed, "application/atom+xml; charset=utf-8", cancellationToken);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     private static (UpdateService Service, Task Server, TcpListener Listener, CancellationTokenSource ServerCancellation) StartRateLimitedFallbackServer()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -267,9 +299,10 @@ public sealed class UpdateCheckFlowTests
     }
 
     [Fact]
-    public async Task SilentCheck_WithoutReleaseBody_UsesFallbackText()
+    public async Task SilentCheck_WithoutReleaseBody_UsesFallbackTextWhenFeedUnavailable()
     {
-        var (service, server) = StartApiServer(NoBodyJson);
+        var (service, server, listener, serverCancellation) =
+            StartApiServerWithFeed(NoBodyJson, 404, "");
         try
         {
             var viewModel = new UpdateViewModel(service, skippedVersion: null);
@@ -282,6 +315,49 @@ public sealed class UpdateCheckFlowTests
         }
         finally
         {
+            serverCancellation.Cancel();
+            listener.Stop();
+            try { await server.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (OperationCanceledException) { }
+            catch (SocketException) { }
+            serverCancellation.Dispose();
+            service.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SilentCheck_WhenApiOmitsBody_RecoversReleaseNotesFromAtomFeed()
+    {
+        var (service, server, listener, serverCancellation) =
+            StartApiServerWithFeed(NoBodyJson, 200, $"""
+                <feed xmlns="http://www.w3.org/2005/Atom">
+                  <entry>
+                    <id>http://127.0.0.1/releases/tag/v9.9.9</id>
+                    <link rel="alternate" href="http://127.0.0.1/releases/tag/v9.9.9" />
+                    <title>SerialBridge v9.9.9</title>
+                    <content type="html">&lt;h2&gt;问题修复&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;API 正文缺失时仍能显示说明&lt;/li&gt;&lt;/ul&gt;</content>
+                  </entry>
+                </feed>
+                """);
+        try
+        {
+            var viewModel = new UpdateViewModel(service, skippedVersion: null);
+            var version = await viewModel.CheckSilentlyAsync();
+
+            Assert.Equal("9.9.9", version);
+            Assert.True(viewModel.UpdateBadgeVisible);
+            Assert.Contains("API 正文缺失时仍能显示说明", viewModel.ReleaseNotes);
+            Assert.DoesNotContain("暂时无法加载", viewModel.ReleaseNotes);
+            await server;
+        }
+        finally
+        {
+            serverCancellation.Cancel();
+            listener.Stop();
+            try { await server.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (OperationCanceledException) { }
+            catch (SocketException) { }
+            serverCancellation.Dispose();
             service.Dispose();
         }
     }
