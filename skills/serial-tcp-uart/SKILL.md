@@ -32,7 +32,7 @@ agent 身份可靠地与设备交互。
 ## 首选方式：scripts/serial_session.py
 
 配套脚本位于本技能目录 `scripts/serial_session.py`，仅依赖 Python 3 标准库。
-它处理 TCP 断开检测与有限重试、显式登录、提示符兼容模式，以及 Linux Shell 的随机标记命令完成协议。Shell 模式同时返回退出码，并对命令输出采用有界内存预览；需要完整日志时可流式写入本地文件。
+它处理 TCP 断开检测与有限重试、显式登录、提示符兼容模式，以及 Linux Shell 的随机标记命令完成协议。Prompt 和 Shell 两种命令模式都遵守 `max_capture_bytes` 输出上限，超限时返回首尾预览并设置 `output_truncated=True`；完整命令输出文件采集仍仅支持 Shell 模式。
 
 无数据不等于端口被占用。登录设备应显式配置 `--login`，连接成功也不代表已确认 Shell 就绪。
 
@@ -101,13 +101,13 @@ Shell 模式会为每条命令生成独立随机标记，在命令前后输出�
 - 仅适用于已确认的 POSIX/Linux Shell（如 BusyBox ash、bash 等）。
 - 不适用于 U-Boot 命令行、MCU CLI、AT 命令终端或未知交互协议；这些继续用默认 `completion="prompt"`。
 - `CommandResult.exit_code` 是 Shell 命令退出码。非零表示命令已完成但执行失败，不等于 TCP/串口传输失败。
-- 默认最多在内存中保留 1 MiB 输出首尾预览。超过上限时 `output_truncated=True`；设置 `capture_path` 可将完整命令输出分块写入本地文件。若本地磁盘写入失败，完成标记到达前会锁定会话，避免在命令状态未知时继续发送。
+- Prompt 和 Shell 模式默认最多在内存中保留 1 MiB 命令输出预览，均可通过 `max_capture_bytes` / `--max-output-bytes` 调整。超过上限时返回首尾预览并设置 `output_truncated=True`；Prompt 模式不支持完整输出文件采集。Shell 模式设置 `capture_path` 可将完整命令输出分块写入本地文件。若本地磁盘写入失败，完成标记到达前会锁定会话，避免在命令状态未知时继续发送。
 - 超时或发送阶段失败意味着命令可能已经执行。脚本会将会话标记为状态不确定并阻止继续发送命令；不要直接重发有副作用的命令。先保留异常中的 `raw_tail` / capture 文件，再重新连接并人工确认设备状态。
 - Shell 模式使用随机标记而不是提示符，因此不需要为持续日志增大 timeout，也不要求串口先安静下来。
 
 **非 Shell 终端 / 兼容模式：**
 
-默认 `completion="prompt"` 继续按提示符判断。默认规则支持常见的 `# `、`$ `、`root@host:~# `、`[root@host ~]# ` 等形式，也允许已知日志级别（如 `WRN:`、`ERR:`）紧接在提示符后面。它仍然是启发式识别，无法像 Shell 标记协议一样可靠地区分任意日志与提示符。
+默认 `completion="prompt"` 继续按提示符判断。默认规则支持常见的 `# `、`$ `、`root@host:~# `、`[root@host ~]# ` 等形式，也允许已知日志级别（如 `WRN:`、`ERR:`）紧接在提示符后面。Prompt 模式同样受 `max_capture_bytes` 限制，超限时保留输出首尾预览并设置 `output_truncated=True`，但不支持通过 `capture_path` 保存完整命令输出。提示符识别仍是启发式方式，无法像 Shell 标记协议一样可靠地区分任意日志与提示符。
 
 如果设备提示符是其他样式（例如 `myboard>`），用 `--prompt` 指定正则。非 Shell 模式超时同样表示“未确认完成”，不表示命令没有执行；会话会被锁定，需重新连接并人工确认，不能直接重发。
 
