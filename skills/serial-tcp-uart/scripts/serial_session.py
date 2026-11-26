@@ -44,7 +44,7 @@ from dataclasses import dataclass
 
 # 默认 shell 提示符：覆盖 "~ # "、"$ "、"# "、"[root@host ~]# " 等常见样式。
 # 若设备提示符不匹配，用 --prompt 显式指定（正则，按行尾匹配）。
-DEFAULT_PROMPT_RE = r"(?:^|\r?\n)[^\r\n]{0,40}(?:[\$#] |~ \$ |~ # )(?=\r?\n|$)"
+DEFAULT_PROMPT_RE = r"(?:^|\r?\n)(?:\[[^\]\r\n]{1,40}\]|\([^\)\r\n]{1,40}\)|[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+(?:[^\r\n ]*)?|[A-Za-z0-9_.-]+)?[ \t]?(?:~[ \t]?)?[\$#] (?=(?:\r?\n|$|(?:WRN|ERR|INF|DBG|INFO|WARN|ERROR|NOTICE|DEBUG|CRIT|ALERT|EMERG):))
 
 LOGIN_RE = re.compile(rb"(?i)login\s*:\s*$")
 PASSWORD_RE = re.compile(rb"(?i)password\s*:\s*$")
@@ -262,16 +262,71 @@ class SerialTcpSession:
         except OSError as exc:
             raise SerialTcpError(f"发送串口数据失败: {exc}") from exc
 
-    def read_available(self, duration: float = 1.0) -> bytes:
+    def read_available(self, duration: float = 1.0,
+                        max_bytes: int = 1024 * 1024,
+                        capture_path: str = None) -> bytes:
+        """在限定时长内采集异步串口输出。
+
+        返回值最多保留 max_bytes 的首尾预览；完整数据可通过 capture_path
+        流式写入文件。用 last_read_truncated/last_read_bytes 查看截断情况。
+        """
+        if max_bytes < 0:
+            raise ValueError("max_bytes 不能小于 0")
+        path_text = os.fspath(capture_path) if capture_path is not None else None
+        file_handle = open(path_text, "wb") if path_text is not None else None
         buffered = bytes(self._pending)
         self._pending.clear()
-        incoming = self._recv_for(duration)
-        if incoming is None:
-            # The data already read before EOF remains available to callers.
-            if buffered:
-                return buffered
-            raise SerialTcpError("串口 TCP 连接已关闭")
-        return buffered + incoming
+        head_limit = (max_bytes + 1) // 2
+        tail_limit = max_bytes - head_limit
+        head = bytearray()
+        tail = bytearray()
+        total = 0
+
+        def capture(data):
+            nonlocal total
+            if not data:
+                return
+            total += len(data)
+            if file_handle is not None:
+                file_handle.write(data)
+            remaining = head_limit - len(head)
+            if remaining > 0:
+                head.extend(data[:remaining])
+                data = data[remaining:]
+            if tail_limit and data:
+                tail.extend(data)
+                if len(tail) > tail_limit:
+                    del tail[:len(tail) - tail_limit]
+
+        try:
+            capture(buffered)
+            deadline = time.monotonic() + max(0, duration)
+            eof = False
+            while time.monotonic() < deadline:
+                try:
+                    incoming = self._recv_for(
+                        min(deadline - time.monotonic(), 0.15), max_bytes=65536
+                    )
+                except SerialTcpError:
+                    if self._eof:
+                        eof = True
+                        break
+                    raise
+                if incoming is None:
+                    eof = True
+                    break
+                capture(incoming)
+            self.last_read_bytes = total
+            self.last_read_truncated = total > max_bytes
+            self.last_read_capture_path = path_text
+            if file_handle is not None:
+                file_handle.flush()
+            if eof and total == 0:
+                raise SerialTcpError("串口 TCP 连接已关闭")
+            return bytes(head) + bytes(tail)
+        finally:
+            if file_handle is not None:
+                file_handle.close()
 
     # ---------- 命令执行 ----------
 
@@ -322,8 +377,25 @@ class SerialTcpSession:
         self._pending.clear()
         try:
             self.send_raw(cmd.encode() + b"\r")
+        except SerialTcpError as exc:
+            self._command_state_uncertain = True
+            self._pending[:0] = previous
+            raise CommandSendError(
+                "命令发送阶段失败，可能已有部分字节到达设备；无法确认是否执行，禁止自动重发。"
+            ) from exc
+        try:
             acc = self._wait_for([pat], t)
-        except (SerialTcpError, PromptTimeoutError):
+        except PromptTimeoutError as exc:
+            raw = bytes(self._pending[-8192:])
+            self._command_state_uncertain = True
+            self._pending[:0] = previous
+            raise CommandCompletionTimeoutError(
+                "命令已发送，但未观察到提示符；命令可能已经执行，不要直接重发。"
+                "请保留输出并重新同步设备状态。",
+                raw_tail=raw
+            ) from exc
+        except SerialTcpError:
+            self._command_state_uncertain = True
             self._pending[:0] = previous
             raise
         if previous:
