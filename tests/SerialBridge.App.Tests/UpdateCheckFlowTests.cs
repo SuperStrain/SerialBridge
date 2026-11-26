@@ -170,10 +170,10 @@ public sealed class UpdateCheckFlowTests
             var value = oneByte[0];
             terminator = (terminator, value) switch
             {
-                (0, '\r') => 1,
-                (1, '\n') => 2,
-                (2, '\r') => 3,
-                (3, '\n') => 4,
+                (0, (byte)'\r') => 1,
+                (1, (byte)'\n') => 2,
+                (2, (byte)'\r') => 3,
+                (3, (byte)'\n') => 4,
                 _ => 0,
             };
         }
