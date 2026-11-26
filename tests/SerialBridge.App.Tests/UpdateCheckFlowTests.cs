@@ -182,6 +182,7 @@ public sealed class UpdateCheckFlowTests
         var rateLimitField = typeof(UpdateService).GetField(
             "_apiLimitedUntil",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        rateLimitField?.SetValue(null, null);
 
         try
         {
