@@ -416,7 +416,7 @@ class SerialSessionPromptOutputLimitTests(unittest.TestCase):
 
         self.assertTrue(result.output_truncated)
         self.assertIn("接收缓冲区此前已截断", result.output)
-        preview, _marker, _detail = result.output.partition("\\n...[输出已截断，")
+        preview, _marker, _detail = result.output.partition("\n...[输出已截断，")
         self.assertTrue(preview.endswith(output[-4096:].decode()))
         # _wait_for retains at most 1 MiB after dropping the original prefix.
         # A larger configured preview limit must not append the same bytes twice.
