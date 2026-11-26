@@ -59,7 +59,7 @@ public sealed class UpdateCheckFlowTests
         return (service, ServeJsonOnceAsync(listener, json));
     }
 
-    private static (UpdateService Service, Task Server) StartRateLimitedFallbackServer()
+    private static (UpdateService Service, Task Server, TcpListener Listener) StartRateLimitedFallbackServer()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -86,7 +86,7 @@ public sealed class UpdateCheckFlowTests
               </entry>
             </feed>
             """;
-        return (service, ServeRateLimitedFallbackAsync(listener, port, feed));
+        return (service, ServeRateLimitedFallbackAsync(listener, port, feed), listener);
     }
 
     private static async Task ServeRateLimitedFallbackAsync(TcpListener listener, int port, string feed)
@@ -178,7 +178,7 @@ public sealed class UpdateCheckFlowTests
     [Fact]
     public async Task CheckDetailed_WhenApiIsRateLimited_LoadsReleaseNotesFromMatchingAtomEntry()
     {
-        var (service, server) = StartRateLimitedFallbackServer();
+        var (service, server, listener) = StartRateLimitedFallbackServer();
         var rateLimitField = typeof(UpdateService).GetField(
             "_apiLimitedUntil",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
@@ -200,6 +200,7 @@ public sealed class UpdateCheckFlowTests
         }
         finally
         {
+            listener.Stop();
             service.Dispose();
             rateLimitField?.SetValue(null, null);
         }
