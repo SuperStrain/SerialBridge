@@ -777,8 +777,8 @@ def main(argv):
             if s.last_read_truncated:
                 destination = s.last_read_capture_path or "未保存文件"
                 print(
-                    f"注意：以下仅为首尾预览，采集 {s.last_read_bytes} 字节；"
-                    f"完整内容: {destination}",
+                    f"注意：以下仅为首尾预览，当前读取 {s.last_read_bytes} 字节；"
+                    f"采集文件: {destination}。若此前缓存已截断，已丢失部分无法恢复。",
                     file=sys.stderr
                 )
                 split_at = (args.max_output_bytes + 1) // 2
