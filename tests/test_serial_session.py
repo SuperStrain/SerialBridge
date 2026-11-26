@@ -328,6 +328,32 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
             finally:
                 session.close()
 
+    def test_read_available_capture_write_error_is_reported_as_serial_error(self):
+        class BrokenCapture:
+            def write(self, _data):
+                raise OSError("disk full")
+
+            def flush(self):
+                pass
+
+            def close(self):
+                pass
+
+        reader, writer = socket.socketpair()
+        session = SerialTcpSession("127.0.0.1", 1)
+        session.sock = reader
+        session._pending.extend(b"raw serial bytes")
+        try:
+            with mock.patch("builtins.open", return_value=BrokenCapture()):
+                with self.assertRaises(SerialTcpError) as caught:
+                    session.read_available(
+                        duration=0, capture_path="/fake/raw-capture.bin"
+                    )
+            self.assertIn("采集文件写入失败", str(caught.exception))
+        finally:
+            session.close()
+            writer.close()
+
 
 if __name__ == "__main__":
     unittest.main()
