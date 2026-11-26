@@ -41,7 +41,7 @@ agent 身份可靠地与设备交互。
 
 ```python
 import sys
-sys.path.insert(0, `<技能目录>/scripts`)   # 按实际路径调整
+sys.path.insert(0, "<技能目录>/scripts")   # 按实际路径调整
 from serial_session import SerialTcpSession
 
 s = SerialTcpSession("192.168.1.100", 9001,
@@ -74,7 +74,7 @@ python3 serial_session.py --host 192.168.1.100 --port 9001 \
 
 # 非 Shell 终端仍使用默认提示符模式
 python3 serial_session.py --host 192.168.1.100 --port 9001 \
-    --prompt `(buildroot@.* [#] )` exec "version"
+    --prompt '(buildroot@.* [#] )' exec "version"
 python3 serial_session.py --host 192.168.1.100 --port 9001 raw --hex "4154 0d" --wait 2
 ```
 
