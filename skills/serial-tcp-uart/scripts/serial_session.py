@@ -427,11 +427,16 @@ class SerialTcpSession:
                 "请保留输出并重新同步设备状态。",
                 raw_tail=raw
             ) from exc
-        except SerialTcpError:
+        except SerialTcpError as exc:
+            raw = bytes(self._pending[-8192:])
             self._command_state_uncertain = True
             self._store_pending(previous + bytes(self._pending),
                                 previous_truncated or self._pending_truncated)
-            raise
+            raise CommandCompletionTimeoutError(
+                "命令已发送，但读取连接时发生错误，未能确认命令完成；命令可能已经执行，"
+                "不要直接重发。请重新连接并人工确认。",
+                raw_tail=raw
+            ) from exc
         if previous or self._pending_truncated:
             self._store_pending(previous + bytes(self._pending),
                                 previous_truncated or self._pending_truncated)
