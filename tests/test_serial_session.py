@@ -174,7 +174,7 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
         with_log = prompt + b"WRN:ctl_ipp_buf_alloc() new buffer failed\r\n"
         self.assertIsNotNone(pattern.search(prompt))
         self.assertIsNotNone(pattern.search(with_log))
-        fake_prompt = b"\\r\\nWRN:ctl_ipp_buf_alloc() emitted a fake # prompt \\\r\\n"
+        fake_prompt = b"\r\nWRN:ctl_ipp_buf_alloc() emitted a fake # prompt \r\n"
         self.assertIsNone(pattern.search(fake_prompt))
 
     def test_echoed_wrapper_and_async_suffix_do_not_cause_false_completion(self):
