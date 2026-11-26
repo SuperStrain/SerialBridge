@@ -561,7 +561,7 @@ class SerialTcpSession:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raw_tail = (bytes(prelude) + bytes(tail) + bytes(buffer))[-8192:]
+                    raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
                     if started:
                         capture(bytes(buffer))
                         buffer.clear()
