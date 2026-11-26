@@ -33,11 +33,14 @@ CLI 用法：
 """
 
 import argparse
+import os
 import re
+import secrets
 import select
 import socket
 import sys
 import time
+from dataclasses import dataclass
 
 # 默认 shell 提示符：覆盖 "~ # "、"$ "、"# "、"[root@host ~]# " 等常见样式。
 # 若设备提示符不匹配，用 --prompt 显式指定（正则，按行尾匹配）。
@@ -59,6 +62,34 @@ class PromptTimeoutError(SerialTcpError):
     """在超时时间内未等到预期提示符/模式。"""
 
 
+class CommandSendError(SerialTcpError):
+    """命令发送阶段失败；部分字节可能已经到达设备，不能自动重发。"""
+
+    command_may_have_executed = True
+
+
+class CommandCompletionTimeoutError(PromptTimeoutError):
+    """Shell 命令可能已经执行，但没有观察到可信的结束标记。"""
+
+    command_may_have_executed = True
+
+    def __init__(self, message, raw_tail=b"", capture_path=None):
+        super().__init__(message)
+        self.raw_tail = raw_tail
+        self.capture_path = capture_path
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """命令完成结果。exit_code=None 表示使用提示符模式，未获取 Shell 退出码。"""
+
+    output: str
+    exit_code: int = None
+    completion: str = "prompt"
+    output_truncated: bool = False
+    capture_path: str = None
+
+
 class SerialTcpSession:
     """一条 SerialBridge TCP 串口会话。线程不安全，单线程使用。"""
 
@@ -78,6 +109,7 @@ class SerialTcpSession:
         self.sock: socket.socket = None
         self._pending = bytearray()
         self._eof = False
+        self._command_state_uncertain = False
 
     # ---------- 连接管理 ----------
 
@@ -146,11 +178,15 @@ class SerialTcpSession:
         self.sock = None
         self._pending.clear()
         self._eof = False
+        self._command_state_uncertain = False
 
     # ---------- 底层收发 ----------
 
-    def _recv_for(self, duration: float):
-        """Read for duration seconds; None means EOF. Does not consume _pending."""
+    def _recv_for(self, duration: float, max_bytes: int = None):
+        """Read for duration seconds; None means EOF. Does not consume _pending.
+
+        max_bytes bounds one read batch without discarding unread socket data.
+        """
         if not self.sock:
             raise SerialTcpError("会话未建立")
         if self._eof:
@@ -159,13 +195,14 @@ class SerialTcpSession:
         end = time.monotonic() + max(0, duration)
         while True:
             remaining = end - time.monotonic()
-            if remaining <= 0:
+            if remaining <= 0 or (max_bytes is not None and len(buf) >= max_bytes):
                 break
             try:
                 ready, _, _ = select.select([self.sock], [], [], remaining)
                 if not ready:
                     break
-                chunk = self.sock.recv(4096)
+                read_size = 4096 if max_bytes is None else min(4096, max_bytes - len(buf))
+                chunk = self.sock.recv(read_size)
                 if not chunk:
                     self._eof = True
                     return bytes(buf) if buf else None
@@ -239,18 +276,48 @@ class SerialTcpSession:
     # ---------- 命令执行 ----------
 
     def exec_command(self, cmd: str, timeout: float = None,
-                     prompt_re: str = None) -> str:
-        """
-        执行一条 shell 命令并返回其输出（已剥离命令回显与提示符）。
-        串口是字节流：必须以提示符作为完成标志，不能用固定时长判断。
+                     prompt_re: str = None, completion: str = "prompt",
+                     max_capture_bytes: int = 1024 * 1024,
+                     capture_path: str = None) -> str:
+        """兼容接口：执行命令并返回输出。需要退出码时使用 exec_command_result()。"""
+        return self.exec_command_result(
+            cmd, timeout=timeout, prompt_re=prompt_re, completion=completion,
+            max_capture_bytes=max_capture_bytes, capture_path=capture_path
+        ).output
+
+    def exec_command_result(self, cmd: str, timeout: float = None,
+                            prompt_re: str = None, completion: str = "prompt",
+                            max_capture_bytes: int = 1024 * 1024,
+                            capture_path: str = None) -> CommandResult:
+        """执行命令并返回结构化结果。
+
+        completion="prompt" 保持旧设备/CLI 的提示符协议。
+        completion="shell" 仅用于已确认的 POSIX/Linux Shell，通过随机标记
+        识别命令边界并获取退出码，不依赖提示符或 TCP recv 分块边界。
         """
         if not self.sock:
             raise SerialTcpError("会话未建立")
+        if self._command_state_uncertain:
+            raise SerialTcpError(
+                "上一条命令的发送/完成状态未知；为避免重复执行，已禁止继续发送。"
+                "请重新连接并人工确认设备状态后再操作。"
+            )
+        if completion == "shell":
+            return self._exec_shell_command(
+                cmd, timeout=timeout, max_capture_bytes=max_capture_bytes,
+                capture_path=capture_path
+            )
+        if completion != "prompt":
+            raise ValueError("completion 必须是 'prompt' 或 'shell'")
+        if capture_path is not None:
+            raise ValueError("capture_path 目前仅支持 completion='shell'")
+        return self._exec_prompt_command(cmd, timeout=timeout, prompt_re=prompt_re)
+
+    def _exec_prompt_command(self, cmd: str, timeout: float = None,
+                             prompt_re: str = None) -> CommandResult:
+        """旧提示符模式，保留给 U-Boot、MCU CLI 及未确认的 Shell 环境。"""
         pat = re.compile(prompt_re.encode()) if prompt_re else self.prompt_re
         t = timeout or self.default_timeout
-
-        # Preserve unsolicited output rather than discarding it silently.
-        # It remains accessible through read_available() if a command fails.
         previous = bytes(self._pending)
         self._pending.clear()
         try:
@@ -259,19 +326,16 @@ class SerialTcpSession:
         except (SerialTcpError, PromptTimeoutError):
             self._pending[:0] = previous
             raise
-        # Previous asynchronous output is not part of this command response.
         if previous:
             self._pending[:0] = previous
 
         text = acc.decode("utf-8", "replace")
         lines = text.splitlines()
-        # 剥离命令回显行（第一个非空行），前导空行一并去除
         for i, ln in enumerate(lines):
             if ln.strip():
-                if cmd.split()[0] in ln:
+                if cmd.split() and cmd.split()[0] in ln:
                     lines = lines[i + 1:]
                 break
-        # 剥离尾部提示符行
         if lines and pat.search(lines[-1].encode(errors="replace")):
             last = lines[-1]
             tail = re.sub(r"(?:~ )?[#$] $", "", last)
@@ -281,7 +345,162 @@ class SerialTcpSession:
                 lines[-1] = tail
             else:
                 lines = lines[:-1]
-        return "\n".join(lines).strip()
+        return CommandResult("\n".join(lines).strip(), completion="prompt")
+
+    def _exec_shell_command(self, cmd: str, timeout: float = None,
+                            max_capture_bytes: int = 1024 * 1024,
+                            capture_path: str = None) -> CommandResult:
+        """POSIX Shell 专用的随机标记协议；持续日志不会影响结束标记识别。"""
+        if "\x00" in cmd:
+            raise ValueError("Shell 命令不能包含 NUL 字节")
+        if max_capture_bytes < 0:
+            raise ValueError("max_capture_bytes 不能小于 0")
+        t = timeout or self.default_timeout
+        token = secrets.token_hex(16)
+        begin = "__SERIAL_SESSION_" + token + "_BEGIN__"
+        end = "__SERIAL_SESSION_" + token + "_END__"
+        rc_var = "__serial_session_rc_" + token
+        # Braces preserve shell state (for example, cd); the newline before }
+        # also prevents a trailing shell comment in cmd from swallowing the wrapper.
+        wrapper = (
+            "printf '\\n%s\\n' '" + begin + "'\n"
+            "{\n" + cmd + "\n}\n"
+            + rc_var + "=$?\n"
+            + "printf '\\n%s:%s\\n' '" + end + "' \"$" + rc_var + "\"\n"
+        )
+        begin_re = re.compile(
+            rb"(?:^|\r?\n)" + re.escape(begin.encode("ascii")) + rb"\r?\n"
+        )
+        end_re = re.compile(
+            rb"(?:^|\r?\n)" + re.escape(end.encode("ascii")) + rb":([0-9]{1,3})\r?\n"
+        )
+        keep_before = len(begin) + 8
+        keep_after = len(end) + 12
+        head_limit = (max_capture_bytes + 1) // 2
+        tail_limit = max_capture_bytes - head_limit
+        head = bytearray()
+        tail = bytearray()
+        total_output = 0
+        buffer = bytearray()
+        started = False
+        previous = bytes(self._pending)
+        self._pending.clear()
+        file_handle = None
+        path_text = os.fspath(capture_path) if capture_path is not None else None
+        if path_text is not None:
+            # Open before sending so a bad path cannot leave a command half-issued.
+            file_handle = open(path_text, "wb")
+
+        def capture(data: bytes):
+            nonlocal total_output
+            if not data:
+                return
+            total_output += len(data)
+            if file_handle is not None:
+                file_handle.write(data)
+            remaining = head_limit - len(head)
+            if remaining > 0:
+                head.extend(data[:remaining])
+                data = data[remaining:]
+            if tail_limit and data:
+                tail.extend(data)
+                if len(tail) > tail_limit:
+                    del tail[:len(tail) - tail_limit]
+
+        def make_preview():
+            truncated = total_output > max_capture_bytes
+            if truncated:
+                omitted = total_output - len(head) - len(tail)
+                raw = bytes(head) + (
+                    "\n...[输出已截断，省略 " + str(omitted) + " 字节；完整内容见 capture 文件]...\n"
+                ).encode("utf-8") + bytes(tail)
+            else:
+                raw = bytes(head) + bytes(tail)
+            return raw.decode("utf-8", "replace").strip(), truncated
+
+        try:
+            try:
+                self.send_raw(wrapper.encode("utf-8"))
+            except SerialTcpError as exc:
+                self._command_state_uncertain = True
+                self._pending[:0] = previous
+                raise CommandSendError(
+                    "Shell 命令发送阶段失败，可能已有部分字节到达设备；"
+                    "无法确认命令是否执行，禁止自动重发。请重新连接并人工确认。"
+                ) from exc
+
+            deadline = time.monotonic() + t
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raw_tail = bytes(buffer[-8192:])
+                    if started:
+                        capture(bytes(buffer))
+                        buffer.clear()
+                    self._command_state_uncertain = True
+                    self._pending[:0] = previous + raw_tail[-65536:]
+                    preview, _ = make_preview()
+                    detail = ("；输出预览：" + preview[-500:]) if preview else ""
+                    raise CommandCompletionTimeoutError(
+                        "已发送 Shell 命令，但未收到可信的结束标记；命令可能已经执行，"
+                        "不要直接重发。请检查原始输出/设备状态并重新同步。" + detail,
+                        raw_tail=raw_tail, capture_path=path_text
+                    )
+
+                chunk = self._recv_for(min(remaining, 0.15), max_bytes=65536)
+                if chunk is None:
+                    raw_tail = bytes(buffer[-8192:])
+                    if started:
+                        capture(bytes(buffer))
+                        buffer.clear()
+                    self._command_state_uncertain = True
+                    self._pending[:0] = previous + raw_tail[-65536:]
+                    raise CommandCompletionTimeoutError(
+                        "等待 Shell 命令结束标记时 TCP 连接关闭；命令可能已经执行，"
+                        "不要自动重发。请重新连接并人工确认。",
+                        raw_tail=raw_tail, capture_path=path_text
+                    )
+                if not chunk:
+                    continue
+                buffer.extend(chunk)
+
+                if not started:
+                    match = begin_re.search(buffer)
+                    if match:
+                        started = True
+                        del buffer[:match.end()]
+                    elif len(buffer) > keep_before:
+                        del buffer[:-keep_before]
+                    continue
+
+                match = end_re.search(buffer)
+                if match:
+                    capture(bytes(buffer[:match.start()]))
+                    remainder = bytes(buffer[match.end():])
+                    self._pending.extend(remainder)
+                    self._pending[:0] = previous
+                    buffer.clear()
+                    if file_handle is not None:
+                        file_handle.flush()
+                    preview, truncated = make_preview()
+                    self._command_state_uncertain = False
+                    return CommandResult(
+                        output=preview,
+                        exit_code=int(match.group(1)),
+                        completion="shell",
+                        output_truncated=truncated,
+                        capture_path=path_text
+                    )
+
+                # Keep only enough suffix to recognize an end marker split across
+                # arbitrary TCP chunks; all older command output is streamed out.
+                safe_length = len(buffer) - keep_after
+                if safe_length > 0:
+                    capture(bytes(buffer[:safe_length]))
+                    del buffer[:safe_length]
+        finally:
+            if file_handle is not None:
+                file_handle.close()
 
     def interrupt(self):
         """发送 Ctrl+C 清空设备当前输入行。"""
@@ -303,6 +522,12 @@ def main(argv):
     ap.add_argument("--prompt", dest="prompt_re", default=None,
                     help="设备提示符正则（默认覆盖常见的 # / $ / ~ # 样式）")
     ap.add_argument("--timeout", type=float, default=8.0)
+    ap.add_argument("--completion", choices=("prompt", "shell"), default="prompt",
+                    help="命令完成协议：prompt 兼容通用 CLI；shell 仅用于已确认的 POSIX/Linux Shell")
+    ap.add_argument("--capture", default=None,
+                    help="shell 模式下将完整命令输出流式写入本地文件")
+    ap.add_argument("--max-output-bytes", type=int, default=1024 * 1024,
+                    help="shell 模式返回给调用方的最大内存预览字节数（默认 1 MiB）")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p_exec = sub.add_parser("exec", help="执行一条 shell 命令")
@@ -331,7 +556,15 @@ def main(argv):
 
     try:
         if args.cmd == "exec":
-            print(s.exec_command(args.command, timeout=args.timeout))
+            result = s.exec_command_result(
+                args.command, timeout=args.timeout, completion=args.completion,
+                max_capture_bytes=args.max_output_bytes, capture_path=args.capture
+            )
+            print(result.output)
+            if result.completion == "shell":
+                print(f"命令退出码: {result.exit_code}", file=sys.stderr)
+                if result.output_truncated:
+                    print(f"输出已截断；完整输出: {result.capture_path or '未保存文件'}", file=sys.stderr)
         elif args.cmd == "raw":
             s.send_raw(bytes.fromhex(args.hex.replace(" ", "")))
             data = s.read_available(args.wait)
