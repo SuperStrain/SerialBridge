@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using SerialBridge.Core.Logging;
 using SerialBridge.Core.Update;
 
@@ -208,8 +211,10 @@ public sealed class UpdateService : IDisposable
                 ? _fallbackUrl[..^"/releases/latest".Length]
                 : _fallbackUrl;
             var downloadUrl = $"{repoBase}/releases/download/{tag}/SerialBridge-Setup-{version}-x64.exe";
+            var releaseNotes = await TryGetReleaseNotesFromFeedAsync(repoBase, tag, ct);
             return UpdateCheckResult.Available(new UpdateInfo(version, downloadUrl, ReleasesPageUrl,
-                IsPortableAssetOnly: !_env.IsInstalledBuild));
+                IsPortableAssetOnly: !_env.IsInstalledBuild,
+                ReleaseNotes: releaseNotes));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -220,6 +225,118 @@ public sealed class UpdateService : IDisposable
             LogX.Warn($"检查更新（网页兜底）失败：{ex.Message}");
             return UpdateCheckResult.Failed($"网络错误（{ex.Message}）");
         }
+    }
+
+    /// <summary>
+    /// API 限流时，从公开 Releases Atom feed 读取与重定向 tag 精确匹配的正文。
+    /// Feed 不消耗 GitHub REST API 配额；必须匹配 tag 链接，不能仅取第一条（可能包含其他 tag）。
+    /// </summary>
+    private async Task<string?> TryGetReleaseNotesFromFeedAsync(string repoBase, string tag, CancellationToken ct)
+    {
+        try
+        {
+            var repoUri = new Uri(repoBase);
+            var feedUrl = repoBase.TrimEnd('/') + "/releases.atom";
+            using var response = await _pageClient.GetAsync(feedUrl, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                LogX.Warn($"检查更新（Atom 兜底）：HTTP {(int)response.StatusCode}");
+                return null;
+            }
+
+            var xml = await response.Content.ReadAsStringAsync(ct);
+            var document = XDocument.Parse(xml);
+            XNamespace atom = "http://www.w3.org/2005/Atom";
+            var expectedPrefix = repoUri.AbsolutePath.TrimEnd('/') + "/releases/tag/";
+
+            foreach (var entry in document.Root?.Elements(atom + "entry") ?? Enumerable.Empty<XElement>())
+            {
+                var matchesTag = entry.Elements(atom + "link").Any(link =>
+                {
+                    var href = (string?)link.Attribute("href");
+                    if (string.IsNullOrWhiteSpace(href) ||
+                        !Uri.TryCreate(repoUri, href, out var linkUri) ||
+                        !string.Equals(linkUri.Host, repoUri.Host, StringComparison.OrdinalIgnoreCase))
+                        return false;
+
+                    var path = Uri.UnescapeDataString(linkUri.AbsolutePath).TrimEnd('/');
+                    return path.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase) &&
+                           string.Equals(path[expectedPrefix.Length..], tag, StringComparison.Ordinal);
+                });
+                if (!matchesTag) continue;
+
+                var content = entry.Element(atom + "content");
+                var contentType = (string?)content?.Attribute("type");
+                var rawBody = content is null
+                    ? null
+                    : string.Equals(contentType, "xhtml", StringComparison.OrdinalIgnoreCase)
+                        ? string.Concat(content.Nodes().Select(node => node.ToString(SaveOptions.DisableFormatting)))
+                        : content.Value;
+
+                if (string.IsNullOrWhiteSpace(rawBody))
+                    rawBody = entry.Element(atom + "summary")?.Value;
+
+                var notes = string.Equals(contentType, "html", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(contentType, "xhtml", StringComparison.OrdinalIgnoreCase)
+                    ? ConvertReleaseHtmlToMarkdown(rawBody ?? "")
+                    : rawBody?.Trim();
+
+                if (!string.IsNullOrWhiteSpace(notes))
+                {
+                    LogX.Info($"检查更新（Atom 兜底）：已获取 {tag} 的更新说明");
+                    return notes;
+                }
+
+                LogX.Warn($"检查更新（Atom 兜底）：{tag} 的 feed 条目没有正文");
+                return null;
+            }
+
+            LogX.Warn($"检查更新（Atom 兜底）：Feed 中未找到与 {tag} 匹配的 Release 条目");
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 更新检查仍可使用版本号和安装包地址；正文获取失败不应让整个更新检查失败。
+            LogX.Warn($"检查更新（Atom 兜底）获取更新说明失败：{ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>将 Atom feed 中已渲染的 Release HTML 转成可再次交给 Markdown 渲染器的文本。</summary>
+    private static string ConvertReleaseHtmlToMarkdown(string html)
+    {
+        var text = Regex.Replace(html, @"<!--.*?-->", "", RegexOptions.Singleline);
+        text = Regex.Replace(text,
+            @"<a\b[^>]*href\s*=\s*(['""])(?<url>.*?)\1[^>]*>(?<text>.*?)</a>",
+            "\${text} (\${url})", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<h([1-6])\b[^>]*>",
+            match => new string('#', int.Parse(match.Groups[1].Value)) + " ",
+            RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</h[1-6]\s*>", "\n\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<pre\b[^>]*>", "\n\`\`\`\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</pre\s*>", "\n\`\`\`\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<li\b[^>]*>", "- ", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</li\s*>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<hr\b[^>]*>", "\n---\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<(strong|b)\b[^>]*>", "**", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</(strong|b)\s*>", "**", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<(em|i)\b[^>]*>", "*", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</(em|i)\s*>", "*", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<code\b[^>]*>", "\`", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</code\s*>", "\`", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</(p|div|ul|ol|blockquote|table|tr)\s*>", "\n\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<(p|div|ul|ol|blockquote|table|tr)\b[^>]*>", "", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<[^>]+>", "");
+        text = WebUtility.HtmlDecode(text).Replace('\u00a0', ' ');
+        text = Regex.Replace(text, @"[ \t]+\r?\n", "\n");
+        text = Regex.Replace(text, @"\n[ \t]+", "\n");
+        text = Regex.Replace(text, @"\n{3,}", "\n\n");
+        return text.Trim();
     }
 
     /// <summary>读 x-ratelimit-reset 设置进程级退避窗口；期间不再请求 API（每次 403 也无意义）。</summary>
