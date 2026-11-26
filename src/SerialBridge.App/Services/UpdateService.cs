@@ -313,6 +313,7 @@ public sealed class UpdateService : IDisposable
         text = Regex.Replace(text,
             @"<a\b[^>]*href\s*=\s*(['""])(?<url>.*?)\1[^>]*>(?<text>.*?)</a>",
             match => string.Concat(match.Groups["text"].Value, " (", match.Groups["url"].Value, ")"),
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
         text = Regex.Replace(text, @"<h([1-6])\b[^>]*>",
             match => new string('#', int.Parse(match.Groups[1].Value)) + " ",
             RegexOptions.IgnoreCase);
