@@ -172,7 +172,7 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
 
     def test_reported_default_prompt_regex_is_sensitive_to_async_log_suffix(self):
         pattern = re.compile(DEFAULT_PROMPT_RE.encode())
-        prompt = b"\r\n# "
+        prompt = b"\r\nroot@NVTEVM:~$ "
         with_log = prompt + b"WRN:ctl_ipp_buf_alloc() new buffer failed\r\n"
         self.assertIsNotNone(pattern.search(prompt))
         self.assertIsNotNone(pattern.search(with_log))
@@ -369,9 +369,12 @@ class SerialSessionPromptOutputLimitTests(unittest.TestCase):
 
         def device():
             try:
-                received.append(writer.recv(4096))
+                request = bytearray()
+                while not request.endswith(b"\\r"):
+                    request.extend(writer.recv(4096))
+                received.append(bytes(request))
                 writer.sendall(
-                    b"cat /tmp/log\r\n" + output + b"\r\nroot@NVTEVM:~$ "
+                    b"cat /tmp/log\r\n" + output + b"\r\n# "
                 )
             except OSError as exc:
                 errors.append(exc)
