@@ -256,7 +256,7 @@ public sealed class UpdateCheckFlowTests
             Assert.Contains("## 问题修复", viewModel.ReleaseNotes);
             Assert.Contains("https://github.com/SuperStrain/SerialBridge/pull/49", viewModel.ReleaseNotes);
             Assert.DoesNotContain("旧版本内容", viewModel.ReleaseNotes);
-            Assert.Contains("&lt;port&gt;", viewModel.ReleaseNotes);
+            Assert.Contains("\\<port\\>", viewModel.ReleaseNotes);
             Assert.Contains("    run()", viewModel.ReleaseNotes);
             Assert.Contains(new string((char)96, 3), viewModel.ReleaseNotes);
 
