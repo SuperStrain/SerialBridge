@@ -421,11 +421,17 @@ class SerialTcpSession:
             raise ValueError("completion 必须是 'prompt' 或 'shell'")
         if capture_path is not None:
             raise ValueError("capture_path 目前仅支持 completion='shell'")
-        return self._exec_prompt_command(cmd, timeout=timeout, prompt_re=prompt_re)
+        return self._exec_prompt_command(
+            cmd, timeout=timeout, prompt_re=prompt_re,
+            max_capture_bytes=max_capture_bytes
+        )
 
     def _exec_prompt_command(self, cmd: str, timeout: float = None,
-                             prompt_re: str = None) -> CommandResult:
+                             prompt_re: str = None,
+                             max_capture_bytes: int = 1024 * 1024) -> CommandResult:
         """旧提示符模式，保留给 U-Boot、MCU CLI 及未确认的 Shell 环境。"""
+        if max_capture_bytes < 0:
+            raise ValueError("max_capture_bytes 不能小于 0")
         pat = re.compile(prompt_re.encode()) if prompt_re else self.prompt_re
         t = timeout or self.default_timeout
         previous = bytes(self._pending)
@@ -482,8 +488,29 @@ class SerialTcpSession:
                 lines[-1] = tail
             else:
                 lines = lines[:-1]
-        return CommandResult("\n".join(lines).strip(), completion="prompt",
-                             output_truncated=self._last_wait_truncated)
+        output = "\n".join(lines).strip().encode("utf-8")
+        truncated = self._last_wait_truncated or len(output) > max_capture_bytes
+        if truncated:
+            head_size = (max_capture_bytes + 1) // 2
+            tail_size = max_capture_bytes - head_size
+            head = output[:head_size]
+            # Clamp the tail start so it never overlaps bytes already kept in head.
+            # _wait_for may have discarded the original prefix before this preview
+            # is built; in that case the retained buffer can be smaller than the
+            # requested preview limit and must be returned only once.
+            tail_start = max(len(output) - tail_size, len(head))
+            tail = output[tail_start:] if tail_size else b""
+            omitted = max(0, len(output) - len(head) - len(tail))
+            if self._last_wait_truncated:
+                detail = "接收缓冲区此前已截断，原始输出前部数据已丢失"
+                if omitted:
+                    detail += "，当前保留数据另省略 " + str(omitted) + " 字节"
+            else:
+                detail = "省略 " + str(omitted) + " 字节"
+            marker = ("\n...[输出已截断，" + detail + "]...\n").encode("utf-8")
+            output = head + marker + tail
+        return CommandResult(output.decode("utf-8", "replace"), completion="prompt",
+                             output_truncated=truncated)
 
     def _exec_shell_command(self, cmd: str, timeout: float = None,
                             max_capture_bytes: int = 1024 * 1024,
@@ -784,8 +811,11 @@ def main(argv):
             print(result.output)
             if result.completion == "shell":
                 print(f"命令退出码: {result.exit_code}", file=sys.stderr)
-                if result.output_truncated:
+            if result.output_truncated:
+                if result.completion == "shell":
                     print(f"输出已截断；完整输出: {result.capture_path or '未保存文件'}", file=sys.stderr)
+                else:
+                    print("提示符模式输出已截断；仅返回首尾预览，完整输出未保存。", file=sys.stderr)
         elif args.cmd == "raw":
             s.send_raw(bytes.fromhex(args.hex.replace(" ", "")))
             data = s.read_available(
