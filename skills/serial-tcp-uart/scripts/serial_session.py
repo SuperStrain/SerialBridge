@@ -516,7 +516,10 @@ class SerialTcpSession:
         started = False
         path_text = os.fspath(capture_path) if capture_path is not None else None
         # Open before touching session state or sending, so a bad path is harmless.
-        file_handle = open(path_text, "wb") if path_text is not None else None
+        try:
+            file_handle = open(path_text, "wb") if path_text is not None else None
+        except OSError as exc:
+            raise SerialTcpError(f"无法创建串口采集文件，命令尚未发送: {exc}") from exc
         previous = bytes(self._pending)
         previous_truncated = self._pending_truncated
         self._pending.clear()
@@ -599,7 +602,7 @@ class SerialTcpSession:
                     if self._eof:
                         chunk = None
                     else:
-                        raw_tail = (bytes(prelude) + bytes(tail) + bytes(buffer))[-8192:]
+                        raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
                         if started:
                             capture(bytes(buffer))
                         self._command_state_uncertain = True
@@ -768,15 +771,28 @@ def main(argv):
                     print(f"输出已截断；完整输出: {result.capture_path or '未保存文件'}", file=sys.stderr)
         elif args.cmd == "raw":
             s.send_raw(bytes.fromhex(args.hex.replace(" ", "")))
-            data = s.read_available(args.wait, max_bytes=args.max_output_bytes, capture_path=args.capture)
-            print(data.hex(" "))
-            sys.stdout.write(data.decode("utf-8", "replace"))
+            data = s.read_available(
+                args.wait, max_bytes=args.max_output_bytes, capture_path=args.capture
+            )
             if s.last_read_truncated:
                 destination = s.last_read_capture_path or "未保存文件"
                 print(
-                    f"输出已截断（采集 {s.last_read_bytes} 字节）；完整输出: {destination}",
+                    f"注意：以下仅为首尾预览，采集 {s.last_read_bytes} 字节；"
+                    f"完整内容: {destination}",
                     file=sys.stderr
                 )
+                split_at = (args.max_output_bytes + 1) // 2
+                head, tail = data[:split_at], data[split_at:]
+                print("[首部预览]")
+                print(head.hex(" "))
+                sys.stdout.write(head.decode("utf-8", "replace"))
+                print("\n...[中间数据已省略，不能将此预览视为完整字节流]...\n")
+                print("[尾部预览]")
+                print(tail.hex(" "))
+                sys.stdout.write(tail.decode("utf-8", "replace"))
+            else:
+                print(data.hex(" "))
+                sys.stdout.write(data.decode("utf-8", "replace"))
         return 0
     except PromptTimeoutError as e:
         print(f"超时：{e}", file=sys.stderr)
