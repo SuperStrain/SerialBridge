@@ -173,7 +173,48 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
         prompt = b"\r\nroot@NVTEVM:~$ "
         with_log = prompt + b"WRN:ctl_ipp_buf_alloc() new buffer failed\r\n"
         self.assertIsNotNone(pattern.search(prompt))
-        self.assertIsNone(pattern.search(with_log))
+        self.assertIsNotNone(pattern.search(with_log))
+        fake_prompt = b"\\r\\nWRN:ctl_ipp_buf_alloc() emitted a fake # prompt \\\r\\n"
+        self.assertIsNone(pattern.search(fake_prompt))
+
+    def test_echoed_wrapper_and_async_suffix_do_not_cause_false_completion(self):
+        def response(conn, begin, end, send, request):
+            send(conn, request)
+            send(conn, b"\r\n" + begin + b"\r\nactual output\r\n" + end + b":0\r\n")
+            send(conn, b"root@NVTEVM:~$ WRN:async log after prompt\r\n")
+
+        result, _ = self.run_session(response, fragment_size=7)
+        self.assertEqual(result.output, "actual output")
+        self.assertEqual(result.exit_code, 0)
+
+    def test_read_available_bounds_memory_and_streams_full_log_to_file(self):
+        payload = b"serial-log-line\r\n" * 50000
+        reader, writer = socket.socketpair()
+        reader.setblocking(False)
+        session = SerialTcpSession("127.0.0.1", 1)
+        session.sock = reader
+
+        def produce():
+            writer.sendall(payload)
+            time.sleep(0.02)
+            writer.close()
+
+        thread = threading.Thread(target=produce, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                capture_path = os.path.join(directory, "async.log")
+                preview = session.read_available(
+                    duration=0.5, max_bytes=256, capture_path=capture_path
+                )
+                self.assertLessEqual(len(preview), 256)
+                self.assertTrue(session.last_read_truncated)
+                self.assertEqual(session.last_read_bytes, len(payload))
+                with open(capture_path, "rb") as capture:
+                    self.assertEqual(capture.read(), payload)
+        finally:
+            session.close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":
