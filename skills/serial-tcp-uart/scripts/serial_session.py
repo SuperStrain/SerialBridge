@@ -108,6 +108,7 @@ class SerialTcpSession:
         self.default_timeout = default_timeout
         self.sock: socket.socket = None
         self._pending = bytearray()
+        self._pending_truncated = False
         self._eof = False
         self._command_state_uncertain = False
         self._last_wait_truncated = False
@@ -181,8 +182,22 @@ class SerialTcpSession:
                 pass
         self.sock = None
         self._pending.clear()
+        self._pending_truncated = False
         self._eof = False
         self._command_state_uncertain = False
+
+    def _store_pending(self, data: bytes, was_truncated: bool = False):
+        """保留待读数据，同时限制异步输出缓存最多 1 MiB。"""
+        pending = bytearray(data)
+        truncated = was_truncated
+        limit = 1024 * 1024
+        if len(pending) > limit:
+            head_size = limit // 2
+            tail_size = limit - head_size
+            pending = pending[:head_size] + pending[-tail_size:]
+            truncated = True
+        self._pending = pending
+        self._pending_truncated = truncated
 
     # ---------- 底层收发 ----------
 
@@ -219,8 +234,10 @@ class SerialTcpSession:
 
     def _wait_for(self, patterns, timeout: float) -> bytes:
         acc = bytearray(self._pending)
+        pending_truncated = self._pending_truncated
         self._pending.clear()
-        self._last_wait_truncated = False
+        self._pending_truncated = False
+        self._last_wait_truncated = pending_truncated
         if len(acc) > 1024 * 1024:
             del acc[:-1024 * 1024]
             self._last_wait_truncated = True
@@ -230,15 +247,15 @@ class SerialTcpSession:
                 match = pat.search(acc)
                 if match:
                     if match.end() < len(acc):
-                        self._pending.extend(acc[match.end():])
+                        self._store_pending(bytes(acc[match.end():]))
                     return bytes(acc[:match.end()])
             remaining = end - time.monotonic()
             if remaining <= 0:
-                self._pending[:0] = acc
+                self._store_pending(bytes(acc), self._last_wait_truncated)
                 raise PromptTimeoutError(f"等待提示符超时（已收到 {bytes(acc[-200:])!r}）")
             chunk = self._recv_for(min(remaining, 0.15))
             if chunk is None:
-                self._pending[:0] = acc
+                self._store_pending(bytes(acc), self._last_wait_truncated)
                 raise SerialTcpError("连接被对端关闭")
             acc.extend(chunk)
             if len(acc) > 1024 * 1024:
@@ -286,7 +303,9 @@ class SerialTcpSession:
         path_text = os.fspath(capture_path) if capture_path is not None else None
         file_handle = open(path_text, "wb") if path_text is not None else None
         buffered = bytes(self._pending)
+        pending_truncated = self._pending_truncated
         self._pending.clear()
+        self._pending_truncated = False
         head_limit = (max_bytes + 1) // 2
         tail_limit = max_bytes - head_limit
         head = bytearray()
@@ -328,7 +347,7 @@ class SerialTcpSession:
                     break
                 capture(incoming)
             self.last_read_bytes = total
-            self.last_read_truncated = total > max_bytes
+            self.last_read_truncated = total > max_bytes or pending_truncated
             self.last_read_capture_path = path_text
             if file_handle is not None:
                 file_handle.flush()
@@ -385,12 +404,14 @@ class SerialTcpSession:
         pat = re.compile(prompt_re.encode()) if prompt_re else self.prompt_re
         t = timeout or self.default_timeout
         previous = bytes(self._pending)
+        previous_truncated = self._pending_truncated
         self._pending.clear()
+        self._pending_truncated = False
         try:
             self.send_raw(cmd.encode() + b"\r")
         except SerialTcpError as exc:
             self._command_state_uncertain = True
-            self._pending[:0] = previous
+            self._store_pending(previous, previous_truncated)
             raise CommandSendError(
                 "命令发送阶段失败，可能已有部分字节到达设备；无法确认是否执行，禁止自动重发。"
             ) from exc
@@ -399,7 +420,8 @@ class SerialTcpSession:
         except PromptTimeoutError as exc:
             raw = bytes(self._pending[-8192:])
             self._command_state_uncertain = True
-            self._pending[:0] = previous
+            self._store_pending(previous + bytes(self._pending),
+                                previous_truncated or self._pending_truncated)
             raise CommandCompletionTimeoutError(
                 "命令已发送，但未观察到提示符；命令可能已经执行，不要直接重发。"
                 "请保留输出并重新同步设备状态。",
@@ -407,10 +429,12 @@ class SerialTcpSession:
             ) from exc
         except SerialTcpError:
             self._command_state_uncertain = True
-            self._pending[:0] = previous
+            self._store_pending(previous + bytes(self._pending),
+                                previous_truncated or self._pending_truncated)
             raise
-        if previous:
-            self._pending[:0] = previous
+        if previous or self._pending_truncated:
+            self._store_pending(previous + bytes(self._pending),
+                                previous_truncated or self._pending_truncated)
 
         text = acc.decode("utf-8", "replace")
         lines = text.splitlines()
@@ -471,7 +495,9 @@ class SerialTcpSession:
         # Open before touching session state or sending, so a bad path is harmless.
         file_handle = open(path_text, "wb") if path_text is not None else None
         previous = bytes(self._pending)
+        previous_truncated = self._pending_truncated
         self._pending.clear()
+        self._pending_truncated = False
 
         def capture(data: bytes):
             nonlocal total_output
@@ -506,7 +532,7 @@ class SerialTcpSession:
                 self.send_raw(wrapper.encode("utf-8"))
             except SerialTcpError as exc:
                 self._command_state_uncertain = True
-                self._pending[:0] = previous
+                self._store_pending(previous, previous_truncated)
                 raise CommandSendError(
                     "Shell 命令发送阶段失败，可能已有部分字节到达设备；"
                     "无法确认命令是否执行，禁止自动重发。请重新连接并人工确认。"
@@ -521,7 +547,7 @@ class SerialTcpSession:
                         capture(bytes(buffer))
                         buffer.clear()
                     self._command_state_uncertain = True
-                    self._pending[:0] = previous + raw_tail[-65536:]
+                    self._store_pending(previous + raw_tail[-65536:], previous_truncated)
                     preview, _ = make_preview()
                     detail = ("；输出预览：" + preview[-500:]) if preview else ""
                     raise CommandCompletionTimeoutError(
@@ -540,7 +566,7 @@ class SerialTcpSession:
                         if started:
                             capture(bytes(buffer))
                         self._command_state_uncertain = True
-                        self._pending[:0] = previous + raw_tail[-65536:]
+                        self._store_pending(previous + raw_tail[-65536:], previous_truncated)
                         raise CommandCompletionTimeoutError(
                             "等待 Shell 命令结束标记时读取连接失败；命令可能已经执行，"
                             "不要自动重发。请重新连接并人工确认。",
@@ -577,8 +603,7 @@ class SerialTcpSession:
                     exit_code = int(match.group(1))
                     capture(bytes(buffer[:match.start()]))
                     remainder = bytes(buffer[match.end():])
-                    self._pending.extend(remainder)
-                    self._pending[:0] = previous
+                    self._store_pending(previous + remainder, previous_truncated)
                     buffer.clear()
                     if file_handle is not None:
                         file_handle.flush()
