@@ -110,6 +110,10 @@ class SerialTcpSession:
         self._pending = bytearray()
         self._eof = False
         self._command_state_uncertain = False
+        self._last_wait_truncated = False
+        self.last_read_bytes = 0
+        self.last_read_truncated = False
+        self.last_read_capture_path = None
 
     # ---------- 连接管理 ----------
 
@@ -216,6 +220,10 @@ class SerialTcpSession:
     def _wait_for(self, patterns, timeout: float) -> bytes:
         acc = bytearray(self._pending)
         self._pending.clear()
+        self._last_wait_truncated = False
+        if len(acc) > 1024 * 1024:
+            del acc[:-1024 * 1024]
+            self._last_wait_truncated = True
         end = time.monotonic() + timeout
         while True:
             for pat in patterns:
@@ -233,6 +241,9 @@ class SerialTcpSession:
                 self._pending[:0] = acc
                 raise SerialTcpError("连接被对端关闭")
             acc.extend(chunk)
+            if len(acc) > 1024 * 1024:
+                del acc[:-1024 * 1024]
+                self._last_wait_truncated = True
             if self._eof and not any(p.search(acc) for p in patterns):
                 self._pending[:0] = acc
                 raise SerialTcpError("连接被对端关闭")
@@ -417,7 +428,8 @@ class SerialTcpSession:
                 lines[-1] = tail
             else:
                 lines = lines[:-1]
-        return CommandResult("\n".join(lines).strip(), completion="prompt")
+        return CommandResult("\n".join(lines).strip(), completion="prompt",
+                             output_truncated=self._last_wait_truncated)
 
     def _exec_shell_command(self, cmd: str, timeout: float = None,
                             max_capture_bytes: int = 1024 * 1024,
@@ -483,8 +495,9 @@ class SerialTcpSession:
             truncated = total_output > max_capture_bytes
             if truncated:
                 omitted = total_output - len(head) - len(tail)
+                destination = ("完整内容见 " + path_text) if path_text else "完整内容未保存"
                 raw = bytes(head) + (
-                    "\n...[输出已截断，省略 " + str(omitted) + " 字节；完整内容见 capture 文件]...\n"
+                    "\n...[输出已截断，省略 " + str(omitted) + " 字节；" + destination + "]...\n"
                 ).encode("utf-8") + bytes(tail)
             else:
                 raw = bytes(head) + bytes(tail)
@@ -505,7 +518,7 @@ class SerialTcpSession:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raw_tail = bytes(buffer[-8192:])
+                    raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
                     if started:
                         capture(bytes(buffer))
                         buffer.clear()
@@ -519,7 +532,22 @@ class SerialTcpSession:
                         raw_tail=raw_tail, capture_path=path_text
                     )
 
-                chunk = self._recv_for(min(remaining, 0.15), max_bytes=65536)
+                try:
+                    chunk = self._recv_for(min(remaining, 0.15), max_bytes=65536)
+                except SerialTcpError as exc:
+                    if self._eof:
+                        chunk = None
+                    else:
+                        raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
+                        if started:
+                            capture(bytes(buffer))
+                        self._command_state_uncertain = True
+                        self._pending[:0] = previous + raw_tail[-65536:]
+                        raise CommandCompletionTimeoutError(
+                            "等待 Shell 命令结束标记时读取连接失败；命令可能已经执行，"
+                            "不要自动重发。请重新连接并人工确认。",
+                            raw_tail=raw_tail, capture_path=path_text
+                        ) from exc
                 if chunk is None:
                     raw_tail = bytes(buffer[-8192:])
                     if started:
