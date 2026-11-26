@@ -567,12 +567,14 @@ class SerialTcpSession:
                     if match:
                         started = True
                         del buffer[:match.end()]
-                    elif len(buffer) > keep_before:
-                        del buffer[:-keep_before]
-                    continue
+                    else:
+                        if len(buffer) > keep_before:
+                            del buffer[:-keep_before]
+                        continue
 
                 match = end_re.search(buffer)
                 if match:
+                    exit_code = int(match.group(1))
                     capture(bytes(buffer[:match.start()]))
                     remainder = bytes(buffer[match.end():])
                     self._pending.extend(remainder)
@@ -584,7 +586,7 @@ class SerialTcpSession:
                     self._command_state_uncertain = False
                     return CommandResult(
                         output=preview,
-                        exit_code=int(match.group(1)),
+                        exit_code=exit_code,
                         completion="shell",
                         output_truncated=truncated,
                         capture_path=path_text
