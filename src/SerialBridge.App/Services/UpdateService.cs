@@ -144,7 +144,17 @@ public sealed class UpdateService : IDisposable
             // Release 正文（Markdown 源文本）用于更新弹窗展示；缺失时由 UI 显示兜底文案。
             string? releaseBody = release.TryGetProperty("body", out var b) &&
                 b.ValueKind == JsonValueKind.String ? b.GetString() : null;
-            return UpdateCheckResult.Available(BuildInfoFromAssets(tag, assets, releaseBody));
+            var updateInfo = BuildInfoFromAssets(tag, assets, releaseBody);
+            if (updateInfo.ReleaseNotes is null)
+            {
+                // Some proxy/API responses omit the body even when the Release has notes.
+                // Recover it from the same tag's public feed without affecting version detection.
+                var repoBase = ReleasesPageUrl[..^"/releases/latest".Length];
+                var feedNotes = await TryGetReleaseNotesFromFeedAsync(repoBase, tag, ct);
+                if (!string.IsNullOrWhiteSpace(feedNotes))
+                    updateInfo = updateInfo with { ReleaseNotes = feedNotes };
+            }
+            return UpdateCheckResult.Available(updateInfo);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
