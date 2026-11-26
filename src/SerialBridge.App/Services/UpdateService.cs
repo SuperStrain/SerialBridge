@@ -272,7 +272,8 @@ public sealed class UpdateService : IDisposable
                     var href = (string?)link.Attribute("href");
                     if (string.IsNullOrWhiteSpace(href) ||
                         !Uri.TryCreate(repoUri, href, out var linkUri) ||
-                        !string.Equals(linkUri.Host, repoUri.Host, StringComparison.OrdinalIgnoreCase))
+                        !string.Equals(linkUri.Scheme, repoUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(linkUri.Authority, repoUri.Authority, StringComparison.OrdinalIgnoreCase))
                         return false;
 
                     var path = Uri.UnescapeDataString(linkUri.AbsolutePath).TrimEnd('/');
