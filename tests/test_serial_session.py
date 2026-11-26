@@ -226,6 +226,31 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
         self.assertTrue(session.last_read_truncated)
         self.assertEqual(session.last_read_bytes, 1024 * 1024)
 
+    def test_prompt_timeout_also_blocks_blind_command_retry(self):
+        reader, writer = socket.socketpair()
+        reader.setblocking(False)
+        session = SerialTcpSession("127.0.0.1", 1, default_timeout=0.1)
+        session.sock = reader
+        received = []
+
+        def device():
+            received.append(writer.recv(4096))
+            writer.sendall(b"command output without a prompt\r\n")
+            time.sleep(0.25)
+
+        thread = threading.Thread(target=device, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(CommandCompletionTimeoutError):
+                session.exec_command_result("reboot", completion="prompt", timeout=0.1)
+            with self.assertRaises(SerialTcpError):
+                session.exec_command_result("reboot", completion="prompt", timeout=0.1)
+            self.assertEqual(len(received), 1)
+        finally:
+            session.close()
+            writer.close()
+            thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()
