@@ -67,7 +67,7 @@ public sealed class UpdateCheckFlowTests
         return (service, ServeJsonOnceAsync(listener, json));
     }
 
-    private static (UpdateService Service, Task Server, TcpListener Listener) StartRateLimitedFallbackServer()
+    private static (UpdateService Service, Task Server, TcpListener Listener, CancellationTokenSource ServerCancellation) StartRateLimitedFallbackServer()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -95,34 +95,46 @@ public sealed class UpdateCheckFlowTests
                   &lt;h2&gt;问题修复&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;&lt;strong&gt;修复串口停止超时&lt;/strong&gt;（&lt;a href=&quot;https://github.com/SuperStrain/SerialBridge/pull/49&quot;&gt;变更记录&lt;/a&gt;）&lt;/li&gt;&lt;/ul&gt;
                   &lt;p&gt;参数 &amp;lt;port&amp;gt; 应保留。&lt;/p&gt;
                   &lt;pre&gt;&lt;code&gt;if x:
-                    run()
+                run()
                   &lt;/code&gt;&lt;/pre&gt;
                 </content>
               </entry>
             </feed>
             """;
-        return (service, ServeRateLimitedFallbackAsync(listener, port, feed), listener);
+        var serverCancellation = new CancellationTokenSource();
+        return (service, ServeRateLimitedFallbackAsync(listener, port, feed, serverCancellation.Token),
+            listener, serverCancellation);
     }
 
-    private static async Task ServeRateLimitedFallbackAsync(TcpListener listener, int port, string feed)
+    private static async Task ServeRateLimitedFallbackAsync(
+        TcpListener listener, int port, string feed, CancellationToken cancellationToken)
     {
-        await RespondOnceAsync(listener, 403, "Forbidden", "", "application/json");
-        await RespondOnceAsync(listener, 302, "Found", "", "text/plain",
-            $"http://127.0.0.1:{port}/releases/tag/v9.9.9");
-        await RespondOnceAsync(listener, 200, "OK", feed, "application/atom+xml; charset=utf-8");
-        listener.Stop();
+        try
+        {
+            await RespondOnceAsync(listener, 403, "Forbidden", "", "application/json", cancellationToken);
+            await RespondOnceAsync(listener, 302, "Found", "", "text/plain", cancellationToken,
+                $"http://127.0.0.1:{port}/releases/tag/v9.9.9");
+            await RespondOnceAsync(listener, 200, "OK", feed, "application/atom+xml; charset=utf-8", cancellationToken);
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 
     private static async Task RespondOnceAsync(
-        TcpListener listener, int status, string reason, string body, string contentType, string? location = null)
+        TcpListener listener, int status, string reason, string body, string contentType,
+        CancellationToken cancellationToken, string? location = null)
     {
-        using var client = await listener.AcceptTcpClientAsync();
+        using var client = await listener.AcceptTcpClientAsync(cancellationToken);
         await using var stream = client.GetStream();
         var terminator = 0;
+        var oneByte = new byte[1];
         while (terminator < 4)
         {
-            var value = stream.ReadByte();
-            if (value < 0) return;
+            var count = await stream.ReadAsync(oneByte.AsMemory(0, 1), cancellationToken);
+            if (count == 0) throw new IOException("Client closed before sending HTTP headers.");
+            var value = oneByte[0];
             terminator = (terminator, value) switch
             {
                 (0, '\r') => 1,
@@ -137,8 +149,8 @@ public sealed class UpdateCheckFlowTests
         var locationHeader = location is null ? "" : $"Location: {location}\r\n";
         var headers = Encoding.ASCII.GetBytes(
             $"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\nContent-Length: {payload.Length}\r\n{locationHeader}Connection: close\r\n\r\n");
-        await stream.WriteAsync(headers);
-        await stream.WriteAsync(payload);
+        await stream.WriteAsync(headers, cancellationToken);
+        await stream.WriteAsync(payload, cancellationToken);
     }
 
     private static async Task ServeJsonOnceAsync(TcpListener listener, string json)
@@ -193,7 +205,7 @@ public sealed class UpdateCheckFlowTests
     [Fact]
     public async Task CheckDetailed_WhenApiIsRateLimited_LoadsReleaseNotesFromMatchingAtomEntry()
     {
-        var (service, server, listener) = StartRateLimitedFallbackServer();
+        var (service, server, listener, serverCancellation) = StartRateLimitedFallbackServer();
         var rateLimitField = typeof(UpdateService).GetField(
             "_apiLimitedUntil",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
@@ -224,7 +236,12 @@ public sealed class UpdateCheckFlowTests
         }
         finally
         {
+            serverCancellation.Cancel();
             listener.Stop();
+            try { await server.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (OperationCanceledException) { }
+            catch (SocketException) { }
+            serverCancellation.Dispose();
             service.Dispose();
             rateLimitField?.SetValue(null, null);
         }
