@@ -157,7 +157,7 @@ class SerialTcpSession:
             initial = self._send_and_wait(b"\r", [LOGIN_RE, self.prompt_re],
                                           self.default_timeout)
         if self.prompt_re.search(initial):
-            self._store_pending(bytes(self._pending) + initial, self._pending_truncated)
+            self._store_pending(initial + bytes(self._pending), self._pending_truncated)
             return
         response = self._send_and_wait(
             self.login.encode("utf-8") + b"\r",
