@@ -127,6 +127,7 @@ public sealed class UpdateCheckFlowTests
                   &lt;h1&gt;SerialBridge v9.9.9&lt;/h1&gt;&lt;p&gt;本版本包含问题修复。&lt;/p&gt;
                   &lt;h2&gt;问题修复&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;&lt;strong&gt;修复串口停止超时&lt;/strong&gt;（&lt;a href=&quot;https://github.com/SuperStrain/SerialBridge/pull/49&quot;&gt;变更记录&lt;/a&gt;）&lt;/li&gt;&lt;/ul&gt;
                   &lt;p&gt;参数 &amp;lt;port&amp;gt; 应保留。&lt;/p&gt;
+                  &lt;p&gt;PowerShell 换行转义：&lt;code&gt;&#96;n&lt;/code&gt;&lt;/p&gt;
                   &lt;pre&gt;&lt;code&gt;if x:
                 run()
                   &lt;/code&gt;&lt;/pre&gt;
@@ -265,6 +266,7 @@ public sealed class UpdateCheckFlowTests
                 .Select(paragraph => string.Concat(paragraph.Inlines.Select(InlineText))));
             Assert.Contains("<port>", renderedText);
             Assert.Contains("    run()", renderedText);
+            Assert.Contains(new string((char)96, 1) + "n", renderedText);
             await server;
         }
         finally
