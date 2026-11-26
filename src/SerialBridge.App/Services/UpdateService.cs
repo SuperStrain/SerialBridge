@@ -237,14 +237,18 @@ public sealed class UpdateService : IDisposable
         {
             var repoUri = new Uri(repoBase);
             var feedUrl = repoBase.TrimEnd('/') + "/releases.atom";
-            using var response = await _pageClient.GetAsync(feedUrl, ct);
+            // Release notes are optional: bound this extra request so a slow feed
+            // cannot prevent the already-discovered version from being surfaced.
+            using var feedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            feedCts.CancelAfter(TimeSpan.FromSeconds(5));
+            using var response = await _pageClient.GetAsync(feedUrl, feedCts.Token);
             if (!response.IsSuccessStatusCode)
             {
                 LogX.Warn($"检查更新（Atom 兜底）：HTTP {(int)response.StatusCode}");
                 return null;
             }
 
-            var xml = await response.Content.ReadAsStringAsync(ct);
+            var xml = await response.Content.ReadAsStringAsync(feedCts.Token);
             var document = XDocument.Parse(xml);
             XNamespace atom = "http://www.w3.org/2005/Atom";
             var expectedPrefix = repoUri.AbsolutePath.TrimEnd('/') + "/releases/tag/";
@@ -292,6 +296,11 @@ public sealed class UpdateService : IDisposable
             }
 
             LogX.Warn($"检查更新（Atom 兜底）：Feed 中未找到与 {tag} 匹配的 Release 条目");
+            return null;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            LogX.Warn("检查更新（Atom 兜底）：获取更新说明超时，保留版本信息继续显示");
             return null;
         }
         catch (OperationCanceledException)
