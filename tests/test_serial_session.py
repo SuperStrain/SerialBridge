@@ -410,6 +410,18 @@ class SerialSessionPromptOutputLimitTests(unittest.TestCase):
                     self.assertTrue(result.output.endswith(output[-tail_size:].decode()))
                 self.assertIn("输出已截断", result.output)
 
+    def test_prompt_mode_does_not_duplicate_after_receive_buffer_truncation(self):
+        output = b"BEGIN-" + (b"0123456789abcdef" * 80000) + b"-END"
+        result = self.run_prompt_session(output, 4 * 1024 * 1024)
+
+        self.assertTrue(result.output_truncated)
+        self.assertIn("接收缓冲区此前已截断", result.output)
+        preview, _marker, _detail = result.output.partition("\\n...[输出已截断，")
+        self.assertTrue(preview.endswith(output[-4096:].decode()))
+        # _wait_for retains at most 1 MiB after dropping the original prefix.
+        # A larger configured preview limit must not append the same bytes twice.
+        self.assertLess(len(result.output.encode("utf-8")), 1024 * 1024 + 256)
+
     def test_prompt_mode_keeps_small_output_without_truncation(self):
         result = self.run_prompt_session(b"small output", 1024)
         self.assertEqual(result.output, "small output")
