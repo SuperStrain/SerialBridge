@@ -495,6 +495,8 @@ class SerialTcpSession:
         tail = bytearray()
         total_output = 0
         buffer = bytearray()
+        prelude = bytearray()
+        prelude_truncated = False
         started = False
         path_text = os.fspath(capture_path) if capture_path is not None else None
         # Open before touching session state or sending, so a bad path is harmless.
@@ -519,6 +521,18 @@ class SerialTcpSession:
                 tail.extend(data)
                 if len(tail) > tail_limit:
                     del tail[:len(tail) - tail_limit]
+
+        def keep_prelude(data: bytes):
+            nonlocal prelude_truncated
+            if not data:
+                return
+            prelude.extend(data)
+            limit = 1024 * 1024
+            if len(prelude) > limit:
+                head_size = limit // 2
+                tail_size = limit - head_size
+                prelude[:] = prelude[:head_size] + prelude[-tail_size:]
+                prelude_truncated = True
 
         def make_preview():
             truncated = total_output > max_capture_bytes
@@ -547,12 +561,13 @@ class SerialTcpSession:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
+                    raw_tail = (bytes(prelude) + bytes(tail) + bytes(buffer))[-8192:]
                     if started:
                         capture(bytes(buffer))
                         buffer.clear()
                     self._command_state_uncertain = True
-                    self._store_pending(previous + raw_tail[-65536:], previous_truncated)
+                    self._store_pending(previous + bytes(prelude) + raw_tail[-65536:],
+                                        previous_truncated or prelude_truncated)
                     preview, _ = make_preview()
                     detail = ("；输出预览：" + preview[-500:]) if preview else ""
                     raise CommandCompletionTimeoutError(
@@ -567,23 +582,25 @@ class SerialTcpSession:
                     if self._eof:
                         chunk = None
                     else:
-                        raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
+                        raw_tail = (bytes(prelude) + bytes(tail) + bytes(buffer))[-8192:]
                         if started:
                             capture(bytes(buffer))
                         self._command_state_uncertain = True
-                        self._store_pending(previous + raw_tail[-65536:], previous_truncated)
+                        self._store_pending(previous + bytes(prelude) + raw_tail[-65536:],
+                                            previous_truncated or prelude_truncated)
                         raise CommandCompletionTimeoutError(
                             "等待 Shell 命令结束标记时读取连接失败；命令可能已经执行，"
                             "不要自动重发。请重新连接并人工确认。",
                             raw_tail=raw_tail, capture_path=path_text
                         ) from exc
                 if chunk is None:
-                    raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
+                    raw_tail = (bytes(prelude) + bytes(tail) + bytes(buffer))[-8192:]
                     if started:
                         capture(bytes(buffer))
                         buffer.clear()
                     self._command_state_uncertain = True
-                    self._store_pending(previous + raw_tail[-65536:], previous_truncated)
+                    self._store_pending(previous + bytes(prelude) + raw_tail[-65536:],
+                                        previous_truncated or prelude_truncated)
                     raise CommandCompletionTimeoutError(
                         "等待 Shell 命令结束标记时 TCP 连接关闭；命令可能已经执行，"
                         "不要自动重发。请重新连接并人工确认。",
@@ -596,11 +613,14 @@ class SerialTcpSession:
                 if not started:
                     match = begin_re.search(buffer)
                     if match:
+                        keep_prelude(bytes(buffer[:match.start()]))
                         started = True
                         del buffer[:match.end()]
                     else:
                         if len(buffer) > keep_before:
-                            del buffer[:-keep_before]
+                            cut = len(buffer) - keep_before
+                            keep_prelude(bytes(buffer[:cut]))
+                            del buffer[:cut]
                         continue
 
                 match = end_re.search(buffer)
@@ -608,7 +628,10 @@ class SerialTcpSession:
                     exit_code = int(match.group(1))
                     capture(bytes(buffer[:match.start()]))
                     remainder = bytes(buffer[match.end():])
-                    self._store_pending(previous + remainder, previous_truncated)
+                    self._store_pending(
+                        previous + bytes(prelude) + remainder,
+                        previous_truncated or prelude_truncated
+                    )
                     buffer.clear()
                     if file_handle is not None:
                         file_handle.flush()
