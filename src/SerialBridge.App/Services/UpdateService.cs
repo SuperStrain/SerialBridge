@@ -312,13 +312,13 @@ public sealed class UpdateService : IDisposable
         var text = Regex.Replace(html, @"<!--.*?-->", "", RegexOptions.Singleline);
         text = Regex.Replace(text,
             @"<a\b[^>]*href\s*=\s*(['""])(?<url>.*?)\1[^>]*>(?<text>.*?)</a>",
-            "\${text} (\${url})", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            match => string.Concat(match.Groups["text"].Value, " (", match.Groups["url"].Value, ")"),
         text = Regex.Replace(text, @"<h([1-6])\b[^>]*>",
             match => new string('#', int.Parse(match.Groups[1].Value)) + " ",
             RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</h[1-6]\s*>", "\n\n", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"<pre\b[^>]*>", "\n\`\`\`\n", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"</pre\s*>", "\n\`\`\`\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<pre\b[^>]*>", "\n" + new string((char)96, 3) + "\n", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</pre\s*>", "\n" + new string((char)96, 3) + "\n", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<li\b[^>]*>", "- ", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</li\s*>", "\n", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
@@ -327,8 +327,8 @@ public sealed class UpdateService : IDisposable
         text = Regex.Replace(text, @"</(strong|b)\s*>", "**", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<(em|i)\b[^>]*>", "*", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</(em|i)\s*>", "*", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"<code\b[^>]*>", "\`", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"</code\s*>", "\`", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"<code\b[^>]*>", new string((char)96, 1), RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"</code\s*>", new string((char)96, 1), RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"</(p|div|ul|ol|blockquote|table|tr)\s*>", "\n\n", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<(p|div|ul|ol|blockquote|table|tr)\b[^>]*>", "", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, @"<[^>]+>", "");
