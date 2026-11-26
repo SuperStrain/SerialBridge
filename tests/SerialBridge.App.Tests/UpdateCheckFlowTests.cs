@@ -186,14 +186,16 @@ public sealed class UpdateCheckFlowTests
 
         try
         {
-            var result = await service.CheckUpdateDetailedAsync();
+            var viewModel = new UpdateViewModel(service, skippedVersion: null);
+            var version = await viewModel.CheckSilentlyAsync();
 
-            Assert.Equal(UpdateCheckStatus.UpdateAvailable, result.Status);
-            Assert.NotNull(result.Info);
-            Assert.Equal("9.9.9", result.Info.Version);
-            Assert.Contains("修复串口停止超时", result.Info.ReleaseNotes);
-            Assert.Contains("## 问题修复", result.Info.ReleaseNotes);
-            Assert.Contains("https://github.com/SuperStrain/SerialBridge/pull/49", result.Info.ReleaseNotes);
+            Assert.Equal("9.9.9", version);
+            Assert.True(viewModel.UpdateBadgeVisible);
+            Assert.Equal("新版本 v9.9.9", viewModel.UpdatePopupTitle);
+            Assert.Contains("修复串口停止超时", viewModel.ReleaseNotes);
+            Assert.Contains("## 问题修复", viewModel.ReleaseNotes);
+            Assert.Contains("https://github.com/SuperStrain/SerialBridge/pull/49", viewModel.ReleaseNotes);
+            Assert.DoesNotContain("旧版本内容", viewModel.ReleaseNotes);
             await server;
         }
         finally
