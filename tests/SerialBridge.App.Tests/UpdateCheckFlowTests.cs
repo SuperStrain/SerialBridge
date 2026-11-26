@@ -235,7 +235,8 @@ public sealed class UpdateCheckFlowTests
             var version = await viewModel.CheckSilentlyAsync();
 
             Assert.Equal("9.9.9", version);
-            Assert.Contains("发布页", viewModel.ReleaseNotes);
+            Assert.Contains("暂时无法加载", viewModel.ReleaseNotes);
+            Assert.Contains("前往发布", viewModel.ReleaseNotes);
             await server;
         }
         finally
