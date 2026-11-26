@@ -312,7 +312,10 @@ class SerialTcpSession:
         if max_bytes < 0:
             raise ValueError("max_bytes 不能小于 0")
         path_text = os.fspath(capture_path) if capture_path is not None else None
-        file_handle = open(path_text, "wb") if path_text is not None else None
+        try:
+            file_handle = open(path_text, "wb") if path_text is not None else None
+        except OSError as exc:
+            raise SerialTcpError(f"无法创建串口采集文件: {exc}") from exc
         buffered = bytes(self._pending)
         pending_truncated = self._pending_truncated
         self._pending.clear()
@@ -365,9 +368,20 @@ class SerialTcpSession:
             if eof and total == 0:
                 raise SerialTcpError("串口 TCP 连接已关闭")
             return bytes(head) + bytes(tail)
+        except OSError as exc:
+            raise SerialTcpError(
+                f"串口输出采集文件写入失败，当前采集可能不完整: {exc}"
+            ) from exc
         finally:
             if file_handle is not None:
-                file_handle.close()
+                active_exception = sys.exc_info()[0] is not None
+                try:
+                    file_handle.close()
+                except OSError as exc:
+                    if not active_exception:
+                        raise SerialTcpError(
+                            f"关闭串口采集文件失败，当前采集可能不完整: {exc}"
+                        ) from exc
 
     # ---------- 命令执行 ----------
 
@@ -732,9 +746,9 @@ def main(argv):
     ap.add_argument("--completion", choices=("prompt", "shell"), default="prompt",
                     help="命令完成协议：prompt 兼容通用 CLI；shell 仅用于已确认的 POSIX/Linux Shell")
     ap.add_argument("--capture", default=None,
-                    help="shell 模式下将完整命令输出流式写入本地文件")
+                    help="将 Shell 命令输出或 raw 串口数据流式写入本地文件")
     ap.add_argument("--max-output-bytes", type=int, default=1024 * 1024,
-                    help="shell 模式返回给调用方的最大内存预览字节数（默认 1 MiB）")
+                    help="返回给调用方的最大内存预览字节数（默认 1 MiB）")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p_exec = sub.add_parser("exec", help="执行一条 shell 命令")
