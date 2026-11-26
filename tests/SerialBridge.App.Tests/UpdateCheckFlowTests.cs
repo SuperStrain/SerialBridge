@@ -73,6 +73,12 @@ public sealed class UpdateCheckFlowTests
         var feed = $"""
             <feed xmlns="http://www.w3.org/2005/Atom">
               <entry>
+                <id>{baseUrl}/releases/tag/v9.9.8</id>
+                <link rel="alternate" href="{baseUrl}/releases/tag/v9.9.8" />
+                <title>SerialBridge v9.9.8</title>
+                <content type="html">&lt;p&gt;旧版本内容，不应显示。&lt;/p&gt;</content>
+              </entry>
+              <entry>
                 <id>{baseUrl}/releases/tag/v9.9.9</id>
                 <link rel="alternate" href="{baseUrl}/releases/tag/v9.9.9" />
                 <title>SerialBridge v9.9.9</title>
