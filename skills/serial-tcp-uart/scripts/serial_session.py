@@ -136,7 +136,7 @@ class SerialTcpSession:
                 if first is None:
                     self.close()
                     continue
-                self._pending.extend(first)
+                self._store_pending(first)
                 if self.login is not None:
                     self._login()
                 return True
@@ -157,7 +157,7 @@ class SerialTcpSession:
             initial = self._send_and_wait(b"\r", [LOGIN_RE, self.prompt_re],
                                           self.default_timeout)
         if self.prompt_re.search(initial):
-            self._pending.extend(initial)
+            self._store_pending(bytes(self._pending) + initial, self._pending_truncated)
             return
         response = self._send_and_wait(
             self.login.encode("utf-8") + b"\r",
@@ -262,7 +262,7 @@ class SerialTcpSession:
                 del acc[:-1024 * 1024]
                 self._last_wait_truncated = True
             if self._eof and not any(p.search(acc) for p in patterns):
-                self._pending[:0] = acc
+                self._store_pending(bytes(acc), self._last_wait_truncated)
                 raise SerialTcpError("连接被对端关闭")
 
     def _send_and_wait(self, data: bytes, patterns, timeout: float) -> bytes:
@@ -573,12 +573,12 @@ class SerialTcpSession:
                             raw_tail=raw_tail, capture_path=path_text
                         ) from exc
                 if chunk is None:
-                    raw_tail = bytes(buffer[-8192:])
+                    raw_tail = (bytes(tail) + bytes(buffer))[-8192:]
                     if started:
                         capture(bytes(buffer))
                         buffer.clear()
                     self._command_state_uncertain = True
-                    self._pending[:0] = previous + raw_tail[-65536:]
+                    self._store_pending(previous + raw_tail[-65536:], previous_truncated)
                     raise CommandCompletionTimeoutError(
                         "等待 Shell 命令结束标记时 TCP 连接关闭；命令可能已经执行，"
                         "不要自动重发。请重新连接并人工确认。",
@@ -633,7 +633,7 @@ class SerialTcpSession:
         time.sleep(0.1)
         response = self._recv_for(0.2)
         if response:
-            self._pending.extend(response)
+            self._store_pending(bytes(self._pending) + response, self._pending_truncated)
 
 
 # ---------- CLI ----------
