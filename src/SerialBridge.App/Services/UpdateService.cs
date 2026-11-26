@@ -119,7 +119,7 @@ public sealed class UpdateService : IDisposable
             if (_apiLimitedUntil > DateTimeOffset.UtcNow)
             {
                 LogX.Info("检查更新：API 限流退避中，直接走网页兜底");
-                return await CheckViaWebRedirectAsync(cts.Token);
+                return await CheckViaWebRedirectAsync(ct);
             }
 
             using var resp = await _http.GetAsync(_apiUrl, cts.Token);
@@ -127,7 +127,7 @@ public sealed class UpdateService : IDisposable
             if ((int)resp.StatusCode == 403)
             {
                 ReadRateLimitReset(resp);
-                return await CheckViaWebRedirectAsync(cts.Token);
+                return await CheckViaWebRedirectAsync(ct);
             }
             if (!resp.IsSuccessStatusCode)
                 return await CheckViaWebRedirectAsync(cts.Token);
@@ -161,6 +161,10 @@ public sealed class UpdateService : IDisposable
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             return UpdateCheckResult.Failed("检查超时");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -208,7 +212,11 @@ public sealed class UpdateService : IDisposable
     {
         try
         {
-            using var resp = await _pageClient.GetAsync(_fallbackUrl, ct);
+            // Keep the redirect request bounded, but do not let its deadline
+            // cancel the optional notes request after the version tag is known.
+            using var pageCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            pageCts.CancelAfter(TimeSpan.FromSeconds(10));
+            using var resp = await _pageClient.GetAsync(_fallbackUrl, pageCts.Token);
             var location = resp.Headers.Location?.ToString();
             LogX.Info($"检查更新（网页兜底）：HTTP {(int)resp.StatusCode}，Location {location ?? "无"}");
             if (string.IsNullOrEmpty(location) || !ReleaseParsing.TryParseTagFromRedirect(location, out var tag))
@@ -231,6 +239,10 @@ public sealed class UpdateService : IDisposable
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             return UpdateCheckResult.Failed("检查超时");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
