@@ -614,16 +614,14 @@ class SerialTcpSession:
                             raw_tail=raw_tail, capture_path=path_text
                         ) from exc
                 if chunk is None:
-                    raw_tail = (bytes(prelude) + bytes(tail) + bytes(buffer))[-8192:]
+                    raw_output_tail = (bytes(tail) + bytes(buffer))[-8192:]
+                    raw_tail = (bytes(prelude) + raw_output_tail)[-8192:]
                     if started:
                         capture(bytes(buffer))
                         buffer.clear()
-                        pending_output = bytes(tail)
-                    else:
-                        pending_output = bytes(buffer)
                     self._command_state_uncertain = True
                     self._store_pending(
-                        previous + bytes(prelude) + pending_output,
+                        previous + bytes(prelude) + raw_output_tail,
                         previous_truncated or prelude_truncated
                     )
                     raise CommandCompletionTimeoutError(
