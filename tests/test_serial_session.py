@@ -65,7 +65,7 @@ class FakeShellServer:
                     if not chunk:
                         return
                     request.extend(chunk)
-                    if b"_END__" in request and request.endswith(b"\n"):
+                    if b"_END__" in request and request.endswith(b"}\n"):
                         break
                 raw = bytes(request)
                 self.requests.append(raw)
@@ -255,7 +255,7 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
 
     def test_async_logs_before_and_after_shell_markers_remain_readable(self):
         def response(conn, begin, end, send, request):
-            self.assertTrue(request.startswith(b"{\\n"))
+            self.assertTrue(request.startswith(b"{\n"))
             send(
                 conn,
                 b"root@NVTEVM:~$ > > WRN:background before marker\\r\\n"
