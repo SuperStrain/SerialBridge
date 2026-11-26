@@ -79,6 +79,7 @@ public sealed class UpdateCheckFlowTests
             downloadDirOverride: Path.Combine(Path.GetTempPath(), "SerialBridge.Tests", Guid.NewGuid().ToString("N")),
             apiUrlOverride: $"{baseUrl}/releases",
             fallbackUrlOverride: $"{baseUrl}/releases/latest");
+        feed = feed.Replace("http://127.0.0.1/", baseUrl + "/", StringComparison.Ordinal);
         var serverCancellation = new CancellationTokenSource();
         return (service, ServeJsonAndFeedAsync(listener, json, feedStatus, feed, serverCancellation.Token),
             listener, serverCancellation);
