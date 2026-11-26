@@ -355,5 +355,80 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
             writer.close()
 
 
+
+class SerialSessionPromptOutputLimitTests(unittest.TestCase):
+    def run_prompt_session(self, output, max_capture_bytes):
+        reader, writer = socket.socketpair()
+        reader.setblocking(False)
+        session = SerialTcpSession(
+            "127.0.0.1", 1, prompt_re=r"root@NVTEVM:~\$ "
+        )
+        session.sock = reader
+        received = []
+        errors = []
+
+        def device():
+            try:
+                received.append(writer.recv(4096))
+                writer.sendall(
+                    b"cat /tmp/log\r\n" + output + b"\r\nroot@NVTEVM:~$ "
+                )
+            except OSError as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=device, daemon=True)
+        thread.start()
+        try:
+            result = session.exec_command_result(
+                "cat /tmp/log", completion="prompt",
+                max_capture_bytes=max_capture_bytes
+            )
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+            self.assertFalse(errors)
+            self.assertEqual(received, [b"cat /tmp/log\r"])
+            return result
+        finally:
+            session.close()
+            writer.close()
+            thread.join(timeout=2)
+
+    def test_prompt_mode_respects_32_1024_and_65536_byte_limits(self):
+        output = b"BEGIN" + (b"x" * 70000) + b"END"
+
+        for limit in (32, 1024, 65536):
+            with self.subTest(max_capture_bytes=limit):
+                result = self.run_prompt_session(output, limit)
+                head_size = (limit + 1) // 2
+                tail_size = limit - head_size
+                self.assertTrue(result.output_truncated)
+                self.assertTrue(result.output.startswith(output[:head_size].decode()))
+                if tail_size:
+                    self.assertTrue(result.output.endswith(output[-tail_size:].decode()))
+                self.assertIn("输出已截断", result.output)
+
+    def test_prompt_mode_keeps_small_output_without_truncation(self):
+        result = self.run_prompt_session(b"small output", 1024)
+        self.assertEqual(result.output, "small output")
+        self.assertFalse(result.output_truncated)
+
+    def test_prompt_mode_rejects_negative_output_limit(self):
+        reader, writer = socket.socketpair()
+        session = SerialTcpSession("127.0.0.1", 1)
+        session.sock = reader
+        try:
+            with self.assertRaisesRegex(ValueError, "max_capture_bytes"):
+                session.exec_command_result(
+                    "echo should-not-send", completion="prompt",
+                    max_capture_bytes=-1
+                )
+            writer.settimeout(0.05)
+            with self.assertRaises(socket.timeout):
+                writer.recv(1)
+        finally:
+            session.close()
+            writer.close()
+
+
 if __name__ == "__main__":
     unittest.main()
