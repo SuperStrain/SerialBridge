@@ -467,13 +467,11 @@ class SerialTcpSession:
         total_output = 0
         buffer = bytearray()
         started = False
+        path_text = os.fspath(capture_path) if capture_path is not None else None
+        # Open before touching session state or sending, so a bad path is harmless.
+        file_handle = open(path_text, "wb") if path_text is not None else None
         previous = bytes(self._pending)
         self._pending.clear()
-        file_handle = None
-        path_text = os.fspath(capture_path) if capture_path is not None else None
-        if path_text is not None:
-            # Open before sending so a bad path cannot leave a command half-issued.
-            file_handle = open(path_text, "wb")
 
         def capture(data: bytes):
             nonlocal total_output
