@@ -45,6 +45,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p test_release_eligibility.py -v
       - name: Validate Chinese release notes generator
         run: python3 -m unittest discover -s tests -p test_release_notes.py -v
+      - name: Validate SerialBridge UART session protocol
+        run: python3 -m unittest discover -s tests -p test_serial_session.py -v
       - name: Determine release eligibility and version
         id: check
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.release_mode != 'build_only') }}
@@ -87,6 +89,9 @@ jobs:
       - name: Validate release note output on Windows
         shell: pwsh
         run: python -m unittest discover -s tests -p test_release_notes.py -v
+      - name: Validate SerialBridge UART session protocol on Windows
+        shell: pwsh
+        run: python -m unittest discover -s tests -p test_serial_session.py -v
       - name: Stress blocked-writer shutdown regression
         shell: pwsh
         run: |
