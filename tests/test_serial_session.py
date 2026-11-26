@@ -254,12 +254,14 @@ class SerialSessionShellCompletionTests(unittest.TestCase):
             thread.join(timeout=2)
 
     def test_async_logs_before_and_after_shell_markers_remain_readable(self):
-        def response(conn, begin, end, send, _request):
+        def response(conn, begin, end, send, request):
+            self.assertTrue(request.startswith(b"{\\n"))
             send(
                 conn,
-                b"WRN:background before marker\r\n" + begin + b"\r\n"
-                b"command result\r\n" + end + b":0\r\n"
-                b"root@NVTEVM:~$ ERR:background after marker\r\n"
+                b"root@NVTEVM:~$ > > WRN:background before marker\\r\\n"
+                + begin + b"\\r\\n"
+                b"command result\\r\\n" + end + b":0\\r\\n"
+                b"root@NVTEVM:~$ ERR:background after marker\\r\\n"
             )
 
         with FakeShellServer(response) as server:
