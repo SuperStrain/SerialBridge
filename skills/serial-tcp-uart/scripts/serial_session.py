@@ -494,12 +494,17 @@ class SerialTcpSession:
             head_size = (max_capture_bytes + 1) // 2
             tail_size = max_capture_bytes - head_size
             head = output[:head_size]
-            tail = output[-tail_size:] if tail_size else b""
+            # Clamp the tail start so it never overlaps bytes already kept in head.
+            # _wait_for may have discarded the original prefix before this preview
+            # is built; in that case the retained buffer can be smaller than the
+            # requested preview limit and must be returned only once.
+            tail_start = max(len(output) - tail_size, len(head))
+            tail = output[tail_start:] if tail_size else b""
             omitted = max(0, len(output) - len(head) - len(tail))
             if self._last_wait_truncated:
-                detail = "接收缓冲区此前已截断"
+                detail = "接收缓冲区此前已截断，原始输出前部数据已丢失"
                 if omitted:
-                    detail += "，当前预览另省略 " + str(omitted) + " 字节"
+                    detail += "，当前保留数据另省略 " + str(omitted) + " 字节"
             else:
                 detail = "省略 " + str(omitted) + " 字节"
             marker = ("\n...[输出已截断，" + detail + "]...\n").encode("utf-8")
