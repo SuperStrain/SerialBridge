@@ -156,7 +156,8 @@ def render(tag: str, prior: str | None, changes: list[dict[str, str]],
         fragments = [f"{totals[c]} 项{c}" for c in CATEGORIES if totals[c]]
         summary = "本版本包含" + "、".join(fragments) + "。" if fragments else "本版本为维护发布，暂无需要单独说明的用户可见变更。"
 
-    lines = [f"# SerialBridge v{version}", "", summary, ""]
+    # GitHub Release already displays the version title above the body.
+    lines = [summary, ""]
     for category in CATEGORIES:
         members = [item for item in changes if item["category"] == category]
         if not members:
